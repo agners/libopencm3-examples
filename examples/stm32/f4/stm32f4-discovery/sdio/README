@@ -1,0 +1,22 @@
+------------------------------------------------------------------------------
+README
+------------------------------------------------------------------------------
+
+This example program uses the SDIO block to communicate with a SD-Memory-Card.
+While fist SD-commands can be executed, it still lacks block read/write 
+support. Everything is done blocking at the moment, but it will be converted
+to use interrupts later.
+
+Connect SD-DATA0-DATA3 to PC8-PC11 on the discovery board.
+Connect SD-CMD to PD2 on the discovery board.
+Connect SD-CLK to PC12 on the discovery board.
+Also connect GND to GND and VCC to 3V.
+
+I connected the SD-Card using cables. It might need pull-up resistors and 
+a PCB to use higher speeds.
+
+The terminal settings for some debug output are 38400 8n1. To use the terminal
+Connect your TTL RX device line to PA2 on the discovery board.
+Connect your TTL TX device line to PA3 on the discovery board.
+
+
