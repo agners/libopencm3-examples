@@ -21,15 +21,33 @@
 
 #include <libopencm3/stm32/f4/rcc.h>
 #include <libopencm3/stm32/f4/gpio.h>
+#include <libopencm3/stm32/f4/dma.h>
 #include <libopencm3/stm32/usart.h>
 #include <libopencm3/stm32/sdio.h>
 #include <libopencm3/cm3/nvic.h>
+#include <libopencm3/stm32/f4/flash.h>
 #include "sd.h"
+
+enum sdtype {
+  SD, /* SD Standard capacity (legancy) */
+  SDV2, /* SD Normal capacity (V 2.00) */
+  SDV2HC, /* SD High capacity (V 2.00) */
+};
+
+struct card {
+  enum sdtype type;
+  uint16_t rca;
+};
+
+struct card card1;
+uint8_t block[512];
 
 static void clock_setup(void)
 {
 	/* Enable GPIOD clock for LED & USARTs. */
   /* Enable GPIO C/D clock for SDIO */
+  rcc_peripheral_enable_clock(&RCC_APB1ENR, RCC_APB1ENR_PWREN); /* ? */
+
 	rcc_peripheral_enable_clock(&RCC_AHB1ENR, RCC_AHB1ENR_IOPDEN);
 	rcc_peripheral_enable_clock(&RCC_AHB1ENR, RCC_AHB1ENR_IOPCEN);
 
@@ -74,7 +92,7 @@ static void sdio_setup(void)
 
   /* Initialize DMA with <400kHz */
   tmp = (SDIO_CLKCR_CLKDIV_MSK & 0x76); //Clock=48000/(118+2)=400Khz
-//  tmp = 0xEE;
+  tmp = 0xEE;
   tmp |= SDIO_CLKCR_CLKEN;
 //  tmp |= SDIO_CLKCR_WIDBUS_4;
   SDIO_CLKCR = tmp;
@@ -145,14 +163,104 @@ void printf_bin(uint32_t test)
   }
   printf("\r\n");
 }
+void printf_hex(uint8_t tohex)
+{
+  char test[3];
+  uint8_t lower = tohex & 0x0f;
+  uint8_t upper = tohex >> 4;
+
+  if(upper <10)
+    test[0] = '0' + upper;
+  else
+    test[0] = 'a' + upper;
+
+  if(lower <10)
+    test[1] = '0' + lower;
+  else
+    test[1] = 'a' + lower;
+
+  test[2] = '\0';
+
+  printf(test);
+}
+
+int sd_start_transfer(uint8_t *buf, uint32_t cnt, uint32_t dir)
+{
+  dma_stream_reset(DMA2, DMA_STREAM3);
+
+  //dma_set_peripheral_address(DMA2, DMA_STREAM3, (uint32_t)&SDIO_FIFO);
+  dma_set_peripheral_address(DMA2, DMA_STREAM3, (uint32_t)0x40012C80);
+  dma_set_memory_address(DMA2, DMA_STREAM3, buf);
+  dma_set_number_of_data(DMA2, DMA_STREAM3, 0); /* Pheripherial control, therefore we don't need to set this */
+
+  /* Control Register */
+  dma_channel_select(DMA2, DMA_STREAM3, DMA_SxCR_CHSEL_4);
+  dma_set_memory_burst(DMA2, DMA_STREAM3, DMA_SxCR_MBURST_INCR4);
+  dma_set_peripheral_burst(DMA2, DMA_STREAM3, DMA_SxCR_PBURST_INCR4);
+  dma_disable_double_buffer_mode(DMA2, DMA_STREAM3);
+  dma_set_priority(DMA2, DMA_STREAM3, DMA_SxCR_PL_VERY_HIGH);
+  dma_disable_peripheral_increment_mode(DMA2, DMA_STREAM3);
+  dma_set_memory_size(DMA2, DMA_STREAM3, DMA_SxCR_MSIZE_32BIT);
+  dma_set_peripheral_size(DMA2, DMA_STREAM3, DMA_SxCR_PSIZE_32BIT);
+  dma_enable_memory_increment_mode(DMA2, DMA_STREAM3);
+  dma_disable_peripheral_increment_mode(DMA2, DMA_STREAM3);
+  /* Don't use circular mode */
+  dma_set_peripheral_flow_control(DMA2, DMA_STREAM3);
+
+  /* FIFO Control Register */
+  dma_disable_fifo_error_interrupt(DMA2, DMA_STREAM3);
+  dma_enable_fifo_mode(DMA2, DMA_STREAM3);
+  dma_set_fifo_threshold(DMA2, DMA_STREAM3, DMA_SxFCR_FTH_4_4_FULL);
+
+  /* Direction according to parameter... */
+  dma_set_transfer_mode(DMA2, DMA_STREAM3, dir);
+
+  dma_enable_stream(DMA2, DMA_STREAM3);
+
+}
+
+
+
+int sd_read_single_block(uint8_t *buf, uint32_t blk)
+{
+  uint32_t addr;
+  uint32_t flag;
+
+  if(card1.type == SDV2HC)
+    addr = blk;
+  else
+    addr = blk * 512;
+
+  sd_start_transfer(buf, 512, DMA_SxCR_DIR_PERIPHERAL_TO_MEM);
+
+  SDIO_DTIMER = 0xffffffff;
+
+  SDIO_ICR = (SDIO_STA_DCRCFAIL | SDIO_STA_DTIMEOUT | SDIO_STA_TXUNDERR | SDIO_STA_RXOVERR | SDIO_STA_DATAEND | SDIO_STA_STBITERR | SDIO_STA_DBCKEND);
+
+  /* CMD 17 */
+  sd_command(READ_SINGLE_BLOCK, SDIO_CMD_WAITRESP_SHORT, 0);
+  printf_bin(SDIO_STA);
+
+  SDIO_DLEN = 512;
+
+  SDIO_DCTRL = ((uint32_t)SDIO_DCTRL_DBLOCKSIZE_9 | SDIO_DCTRL_DMAEN | SDIO_DCTRL_DTDIR | SDIO_DCTRL_DTEN);
+
+  for(flag=0;flag<10000;flag++);
+  printf_bin(SDIO_STA);
+
+  while(!(SDIO_STA & SDIO_STA_DBCKEND)) ;
+}
+
 
 int main(void)
 {
-  rcc_clock_setup_hse_3v3(&hse_8mhz_3v3[CLOCK_3V3_168MHZ]);
   uint32_t flag;
   uint32_t f8 = 0;
   uint16_t rca = 0;
   uint32_t tmp;
+
+  rcc_clock_setup_hse_3v3(&hse_8mhz_3v3[CLOCK_3V3_168MHZ]);
+
 	clock_setup();
 	gpio_setup();
   sdio_setup();
@@ -165,11 +273,15 @@ int main(void)
   //printf_bin(SDIO_STA);
   printf("Send if condition (CMD8)...\r\n");
   sd_command(SEND_IF_COND, SDIO_CMD_WAITRESP_SHORT, 0x000001AA);
-  if(SDIO_STA & SDIO_STA_CMDREND)
-    f8 = 1;
-  else if(SDIO_STA & SDIO_STA_CTIMEOUT)
-    f8 = 0;
-  printf_bin(f8);
+    
+  /* Legancy SD if this command does not answer... */
+  if(SDIO_STA & SDIO_STA_CTIMEOUT)
+    card1.type = SD;
+  else if(SDIO_STA & SDIO_STA_CMDREND)
+    card1.type = SDV2;
+  else
+    return;
+
   /*
   printf_bin(SDIO_STA);
   printf_bin(SDIO_RESP1);
@@ -178,8 +290,6 @@ int main(void)
   /* Enable Application commands */
   printf("Enable application commands... (CMD55)\r\n");
   sd_command(APP_CMD, SDIO_CMD_WAITRESP_SHORT, 0);
-
-
 
   /* The card should now be in app cmd mode... */
   if(!(SDIO_RESP1 & SDIO_CRDST_APP_CMD) && SDIO_STA && SDIO_STA_CTIMEOUT)
@@ -198,12 +308,19 @@ int main(void)
   do {
     sd_command(APP_CMD, SDIO_CMD_WAITRESP_SHORT, 0);
    // printf_bin(SDIO_STA);
-//    sd_command(SD_APP_OP_COND, SDIO_CMD_WAITRESP_SHORT, 0x80000000 | SDIO_OCR_32_33 | f8 ? 0x40000000 : 0);
-    sd_command(SD_APP_OP_COND, SDIO_CMD_WAITRESP_SHORT, (uint32_t) 0x80100000 | (uint32_t) 0x40000000);
+  //  sd_command(SD_APP_OP_COND, SDIO_CMD_WAITRESP_SHORT, (uint32_t)0x40000000 | (uint32_t)SDIO_OCR_32_33 | card1.type == SD ? (uint32_t)0x80000000 : 0);
+    sd_command(SD_APP_OP_COND, SDIO_CMD_WAITRESP_SHORT, (uint32_t)0x40000000 | (uint32_t)SDIO_OCR_32_33 | (uint32_t)0x80000000);
+//   sd_command(SD_APP_OP_COND, SDIO_CMD_WAITRESP_SHORT, (uint32_t) 0x80100000 | (uint32_t) 0x40000000);
 //    printf_bin(SDIO_STA);
     printf_bin(SDIO_RESP1);
     printf("-----\r\n\r\n");
   } while(SDIO_STA & SDIO_STA_CTIMEOUT || !(SDIO_RESP1 & SDIO_RESP1_READY));
+
+  if(card1.type == SDV2)
+  {
+    if(SDIO_RESP1 & 0x40000000)
+      card1.type = SDV2HC;
+  }
 
   /* Get card id */
   printf("Get card id (CMD2)...\r\n");
@@ -214,25 +331,54 @@ int main(void)
   printf_bin(SDIO_RESP3);
   printf_bin(SDIO_RESP4);
 
+
+  printf("Relative Addr...\r\n");
   sd_command(SEND_RELATIVE_ADDR, SDIO_CMD_WAITRESP_SHORT, 0);
   rca = SDIO_RESP1 >> 16;
-  printf_bin(rca);
+  printf_bin(SDIO_STA);
+
+  printf("Read specific information (CMD9)...\r\n");
+  sd_command(SEND_CSD, SDIO_CMD_WAITRESP_LONG, rca << 16);
+  printf_bin(SDIO_STA);
 
   /* Select the card... */
+  printf("Put the card in transfer mode (CMD7)...\r\n");
   sd_command(SELECT_CARD, SDIO_CMD_WAITRESP_SHORT, rca << 16);
-  printf_bin(SDIO_RESP1);
+  printf_bin(SDIO_STA);
 
   sd_command(APP_CMD, SDIO_CMD_WAITRESP_SHORT, rca << 16);
 
-  sd_command(SET_BUS_WIDTH, SDIO_CMD_WAITRESP_SHORT, BUS_WIDTH_4);
+  printf("Set bus width (ACMD6)...\r\n");
+  sd_command(SET_BUS_WIDTH, SDIO_CMD_WAITRESP_SHORT, BUS_WIDTH_0);
+  printf_bin(SDIO_STA);
 
   /* Initialize DMA with <400kHz */
   tmp = (SDIO_CLKCR_CLKDIV_MSK & 0x76); //Clock=48000/(118+2)=400Khz
+  tmp = 0xee;
   tmp |= SDIO_CLKCR_CLKEN;
-  tmp |= SDIO_CLKCR_WIDBUS_4;
+  tmp |= SDIO_CLKCR_WIDBUS_1;
   SDIO_CLKCR = tmp;
 
+  while(DMA_SCR(DMA2, DMA_STREAM3)  & DMA_SxCR_EN);
 
+  printf("Read single block...\r\n");
+  sd_read_single_block(block, 3000);
+
+  for(flag =0 ;flag < 10000000; flag++);
+  flag = 0;
+  //while(DMA_SCR(DMA2, DMA_STREAM3) & DMA_SxCR_EN)
+    flag++;
+
+  printf_bin(flag);
+
+  printf("Read finished...\r\n");
+  printf_bin(*((uint32_t *)block));
+  for(flag=0;flag< 512;flag++)
+    printf_hex(block[flag]);
+/*
+  for(flag=0;flag< 20;flag++)
+    printf(block);
+*/
 	while (1) {
 		__asm__("NOP");
 	}
