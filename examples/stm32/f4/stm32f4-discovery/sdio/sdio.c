@@ -57,6 +57,8 @@ static void sdio_setup(void)
 {
 	uint32_t tmp;
 
+	sdio_reset();
+
 	/* Enable D0-D3 */
 	gpio_mode_setup(GPIOC, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO8);
 	gpio_mode_setup(GPIOC, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO9);
@@ -88,15 +90,13 @@ static void sdio_setup(void)
 	/* Enable DMA2 clock */
 	rcc_peripheral_enable_clock(&RCC_AHB1ENR, RCC_AHB1ENR_DMA2EN);
 
-	/* Initialize DMA with <400kHz */
-	tmp = (SDIO_CLKCR_CLKDIV_MSK & 0x76); //Clock=48000/(118+2)=400Khz
-	tmp = 0xEE;
-	tmp |= SDIO_CLKCR_CLKEN;
-	tmp |= SDIO_CLKCR_WIDBUS_1;
-	SDIO_CLKCR = tmp;
+	/* Initialize Clock with <400kHz */
+	sdio_set_clockdiv(0xee);
+	sdio_set_buswidth(SDIO_CLKCR_WIDBUS_1);
+	sdio_enable_clock();
 
 	/* Power on... */
-	SDIO_POWER = SDIO_POWER_PWRCTRL_PWRON;
+	sdio_power_on();
 }
 
 static void usart_setup(void)
@@ -380,18 +380,15 @@ int main(void)
 	sd_command(SET_BUS_WIDTH, SDIO_CMD_WAITRESP_SHORT, BUS_WIDTH_4);
 	printf_bin(SDIO_STA);
 
-	/* Initialize DMA with <400kHz */
-	tmp = (SDIO_CLKCR_CLKDIV_MSK & 0x76); //Clock=48000/(118+2)=400Khz
-	tmp |= SDIO_CLKCR_CLKEN;
-	tmp |= SDIO_CLKCR_WIDBUS_4;
-	SDIO_CLKCR = tmp;
+	/* Raise Clock with to 1MHz */
+	sdio_set_clockdiv(0x2E); //Clock=48000/(46+2)=1MHz
+	sdio_set_buswidth(SDIO_CLKCR_WIDBUS_4);
+	sdio_enable_clock();
 
 	/* Set block len */
 	printf("Set block len (CMD16)...\r\n");
 	sd_command(SET_BLOCKLEN, SDIO_CMD_WAITRESP_SHORT, 0x200);
 	printf_bin(SDIO_STA);
-
-	while(DMA_SCR(DMA2, DMA_STREAM3)	& DMA_SxCR_EN);
 
 	printf("Read single block...\r\n");
 	sd_read_single_block(block, 0);
