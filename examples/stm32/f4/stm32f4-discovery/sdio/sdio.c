@@ -196,8 +196,7 @@ int sd_start_transfer(uint8_t *buf, uint32_t cnt, uint32_t dir)
 	dma_stream_reset(DMA2, DMA_STREAM3);
 	dma_channel_select(DMA2, DMA_STREAM3, DMA_SxCR_CHSEL_4);
 
-	//dma_set_peripheral_address(DMA2, DMA_STREAM3, (uint32_t)&SDIO_FIFO);
-	dma_set_peripheral_address(DMA2, DMA_STREAM3, (uint32_t)0x40012C80);
+	dma_set_peripheral_address(DMA2, DMA_STREAM3, (uint32_t)&SDIO_FIFO);
 	dma_set_memory_address(DMA2, DMA_STREAM3, (uint32_t)buf);
 	dma_set_number_of_data(DMA2, DMA_STREAM3, 0); /* Pheripherial control, therefore we don't need to set this */
 
@@ -245,16 +244,15 @@ int sd_read_single_block(uint8_t *buf, uint32_t blk)
 	else
 		addr = blk * 512;
 
-	SDIO_DTIMER = 0xffffffff;
+	sdio_data_timeout(20000); // 20000x1MHz = 20ms
 
+	/* Initialize DMA */
 	sd_start_transfer(buf, 512, DMA_SxCR_DIR_PERIPHERAL_TO_MEM);
-//	SDIO_ICR = (SDIO_ICR_DCRCFAIL | SDIO_ICR_DTIMEOUT | SDIO_ICR_TXUNDERR | SDIO_ICR_RXOVERR | SDIO_ICR_DATAEND | SDIO_ICR_STBITERR | SDIO_ICR_DBCKEND);
+
+	/* Start DMA transfer on SDIO pheripherial */
+	sdio_start_block_transfer(512, SDIO_DCTRL_DBLOCKSIZE_9, SDIO_DCTRL_DTDIR_CARD_TO_CTRL, SDIO_DCTRL_DMA_ENABLE);
 
 	/* CMD 17 */
-	SDIO_DLEN = 512;
-
-	SDIO_DCTRL = ((uint32_t)SDIO_DCTRL_DBLOCKSIZE_9 | SDIO_DCTRL_DMAEN | SDIO_DCTRL_DTDIR | SDIO_DCTRL_DTEN);
-
 	sd_command(READ_SINGLE_BLOCK, SDIO_CMD_WAITRESP_SHORT, addr);
 
 	for(flag=0;flag<1000;flag++);
