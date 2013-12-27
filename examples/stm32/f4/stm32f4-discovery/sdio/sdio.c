@@ -267,6 +267,7 @@ int main(void)
 	uint32_t f8 = 0;
 	uint16_t rca = 0;
 	uint32_t tmp;
+	uint32_t hcs;
 
 	rcc_clock_setup_hse_3v3(&hse_8mhz_3v3[CLOCK_3V3_168MHZ]);
 
@@ -286,10 +287,16 @@ int main(void)
 	/* Legancy SD if this command does not answer... */
 	if(SDIO_STA & SDIO_STA_CTIMEOUT)
 	{
+		printf("Card-Type: SD\n");
 		card1.type = SD;
 	}
 	else if(SDIO_STA & SDIO_STA_CMDREND)
+	{
+		printf("Card-Type: SDV2\n");
+		/* We set Rsv too, seems to be needed on some cards */
+		hcs = 0x40000000 | 0x80000000;
 		card1.type = SDV2;
+	}
 	else
 		return;
 
@@ -317,14 +324,11 @@ int main(void)
 
 	/* Set Operation Condition, wait until ready... */
 	do {
+		/* Application command */
 		sd_command(APP_CMD, SDIO_CMD_WAITRESP_SHORT, 0);
-	 // printf_bin(SDIO_STA);
-	//	sd_command(SD_APP_OP_COND, SDIO_CMD_WAITRESP_SHORT, (uint32_t)0x40000000 | (uint32_t)SDIO_OCR_32_33 | card1.type == SD ? (uint32_t)0x80000000 : 0);
-		sd_command(SD_APP_OP_COND, SDIO_CMD_WAITRESP_SHORT, (uint32_t)0x40000000 | (uint32_t)SDIO_OCR_32_33 | (uint32_t)0x80000000);
-//	 sd_command(SD_APP_OP_COND, SDIO_CMD_WAITRESP_SHORT, (uint32_t) 0x80100000 | (uint32_t) 0x40000000);
-//		printf_bin(SDIO_STA);
-		printf_bin(SDIO_RESP1);
-		printf("-----\r\n\r\n");
+
+		/* Sent HCS Flag if SDV2! */
+		sd_command(SD_APP_OP_COND, SDIO_CMD_WAITRESP_SHORT, hcs | (uint32_t)SDIO_OCR_32_33);
 	} while(SDIO_STA & SDIO_STA_CTIMEOUT || !(SDIO_RESP1 & SDIO_RESP1_READY));
 
 	if(card1.type == SDV2)
