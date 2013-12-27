@@ -40,6 +40,50 @@ struct card {
 struct card card1;
 uint8_t block[512];
 
+void printf(char* str)
+{
+	while(*str)
+	{
+		usart_send_blocking(USART2, *str);
+		str++;
+	}
+}
+
+void printf_bin(uint32_t test)
+{
+	int i = 1;
+	int k;
+	for(k = 0; k<32;k++)
+	{
+		if((i << k) & test)
+			usart_send_blocking(USART2, '1');
+		else
+			usart_send_blocking(USART2, '0');
+	}
+	printf("\r\n");
+}
+void printf_hex(uint8_t tohex)
+{
+	char test[3];
+	uint8_t lower = tohex & 0x0f;
+	uint8_t upper = tohex >> 4;
+
+	if(upper <10)
+		test[0] = '0' + upper;
+	else
+		test[0] = 'a' + upper - 10;
+
+	if(lower <10)
+		test[1] = '0' + lower;
+	else
+		test[1] = 'a' + lower - 10;
+
+	test[2] = '\0';
+
+	printf(test);
+}
+
+
 static void clock_setup(void)
 {
 	/* Enable GPIOD clock for LED & USARTs. */
@@ -55,8 +99,6 @@ static void clock_setup(void)
 
 static void sdio_setup(void)
 {
-	uint32_t tmp;
-
 	sdio_reset();
 
 	/* Enable D0-D3 */
@@ -138,50 +180,6 @@ static void gpio_setup(void)
 	/* Setup GPIO pin GPIO12 on GPIO port D for LED. */
 	gpio_mode_setup(GPIOD, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO12);
 }
-
-void printf(char* str)
-{
-	while(*str)
-	{
-		usart_send_blocking(USART2, *str);
-		str++;
-	}
-}
-
-void printf_bin(uint32_t test)
-{
-	int i = 1;
-	int k;
-	for(k = 0; k<32;k++)
-	{
-		if((i << k) & test)
-			usart_send_blocking(USART2, '1');
-		else
-			usart_send_blocking(USART2, '0');
-	}
-	printf("\r\n");
-}
-void printf_hex(uint8_t tohex)
-{
-	char test[3];
-	uint8_t lower = tohex & 0x0f;
-	uint8_t upper = tohex >> 4;
-
-	if(upper <10)
-		test[0] = '0' + upper;
-	else
-		test[0] = 'a' + upper - 10;
-
-	if(lower <10)
-		test[1] = '0' + lower;
-	else
-		test[1] = 'a' + lower - 10;
-
-	test[2] = '\0';
-
-	printf(test);
-}
-
 void dma2_stream3_isr(void)
 {
 	printf("Stream 3 ISR");
@@ -250,7 +248,7 @@ int sd_read_single_block(uint8_t *buf, uint32_t blk)
 	sd_start_transfer(buf, 512, DMA_SxCR_DIR_PERIPHERAL_TO_MEM);
 
 	/* Start DMA transfer on SDIO pheripherial */
-	sdio_start_block_transfer(512, SDIO_DCTRL_DBLOCKSIZE_9, SDIO_DCTRL_DTDIR_CARD_TO_CTRL, SDIO_DCTRL_DMA_ENABLE);
+	sdio_start_block_transfer(512, SDIO_DCTRL_DBLOCKSIZE_9, SDIO_DCTRL_DTDIR_CARD_TO_CTRL, true);
 
 	/* CMD 17 */
 	sd_command(READ_SINGLE_BLOCK, SDIO_CMD_WAITRESP_SHORT, addr);
@@ -409,7 +407,7 @@ int main(void)
 
 void usart2_isr(void)
 {
-	static u8 data = 'A';
+	static uint8_t data = 'A';
 
 	/* Check if we were called because of RXNE. */
 	if (((USART_CR1(USART2) & USART_CR1_RXNEIE) != 0) &&
