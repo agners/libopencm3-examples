@@ -17,6 +17,7 @@
  * along with this library. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#define DEBUG
 #include <libopencm3/stm32/f4/rcc.h>
 #include <libopencm3/stm32/f4/gpio.h>
 #include <libopencm3/stm32/f4/dma.h>
@@ -115,14 +116,10 @@ static void sdio_setup(void)
 	/* Enable CLK */
 	gpio_mode_setup(GPIOC, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO12);
 	gpio_set_af(GPIOC, GPIO_AF12, GPIO12);
-	//gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO12);
-	//gpio_set(GPIOC, GPIO12);
 	gpio_set_output_options(GPIOC, GPIO_OTYPE_PP, GPIO_OSPEED_25MHZ, GPIO12);
 
 	/* Enable CMD (on GPIOD!) */
 	gpio_mode_setup(GPIOD, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO2);
-	//gpio_mode_setup(GPIOD, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO4);
-	//gpio_set(GPIOD, GPIO4);
 	gpio_set_output_options(GPIOD, GPIO_OTYPE_PP, GPIO_OSPEED_25MHZ, GPIO2);
 	gpio_set_af(GPIOD, GPIO_AF12, GPIO2);
 
@@ -180,17 +177,37 @@ static void gpio_setup(void)
 	/* Setup GPIO pin GPIO12 on GPIO port D for LED. */
 	gpio_mode_setup(GPIOD, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO12);
 }
+
 void dma2_stream3_isr(void)
 {
-	printf("Stream 3 ISR");
 	if (dma_get_interrupt_flag(DMA2, DMA_STREAM3, DMA_TCIF))
 	{
-		printf("Stream 3 ISR");
+		printf("Stream 3 completed");
+		dma_clear_interrupt_flags(DMA2, DMA_STREAM3, DMA_TCIF);
+	}
+	else if (dma_get_interrupt_flag(DMA2, DMA_STREAM3, DMA_HTIF))
+	{
+		printf("Stream 3 half");
+		dma_clear_interrupt_flags(DMA2, DMA_STREAM3, DMA_HTIF);
+	}
+	else if (dma_get_interrupt_flag(DMA2, DMA_STREAM3, DMA_TEIF))
+	{
+		printf("Stream 3 error");
+		dma_clear_interrupt_flags(DMA2, DMA_STREAM3, DMA_TEIF);
+	}
+	else if (dma_get_interrupt_flag(DMA2, DMA_STREAM3, DMA_DMEIF))
+	{
+		printf("Stream 3 fifo error");
+		dma_clear_interrupt_flags(DMA2, DMA_STREAM3, DMA_DMEIF);
 	}
 }
 
 int sd_start_transfer(uint8_t *buf, uint32_t cnt, uint32_t dir)
 {
+	/* Enable the DMA interrupt. */
+	nvic_enable_irq(NVIC_DMA2_STREAM3_IRQ);
+
+	/* Configure DMA2 Stream 3 for use with SDIO */
 	dma_stream_reset(DMA2, DMA_STREAM3);
 	dma_channel_select(DMA2, DMA_STREAM3, DMA_SxCR_CHSEL_4);
 
@@ -223,9 +240,10 @@ int sd_start_transfer(uint8_t *buf, uint32_t cnt, uint32_t dir)
 	/* Direction according to parameter... */
 	dma_set_transfer_mode(DMA2, DMA_STREAM3, dir);
 
-	printf("DMA flags:\r\n");
+#ifdef DEBUG
+	printf("Combined DMA flags:\r\n");
 	printf_bin(DMA_SCR(DMA2, DMA_STREAM3));
-
+#endif
 
 	dma_enable_stream(DMA2, DMA_STREAM3);
 }
@@ -235,7 +253,6 @@ int sd_start_transfer(uint8_t *buf, uint32_t cnt, uint32_t dir)
 int sd_read_single_block(uint8_t *buf, uint32_t blk)
 {
 	uint32_t addr;
-	uint32_t flag;
 
 	if(card1.type == SDV2HC)
 		addr = blk;
@@ -253,20 +270,38 @@ int sd_read_single_block(uint8_t *buf, uint32_t blk)
 	/* CMD 17 */
 	sd_command(READ_SINGLE_BLOCK, SDIO_CMD_WAITRESP_SHORT, addr);
 
-	for(flag=0;flag<1000;flag++);
-	printf("Status1\n\r");
 	printf_bin(SDIO_STA);
-
 	while(!(SDIO_STA & SDIO_STA_DBCKEND)) ;
+	printf_bin(SDIO_STA);
 }
+
+int sd_read_single_block_blocking(uint32_t blk)
+{
+	uint32_t flag;
+	printf("Read single block...\r\n");
+	sd_read_single_block(block, blk);
+
+	printf("Read finished...\r\n");
+	printf_bin(*((uint32_t *)block));
+
+
+	printf("The data:\r\n");
+
+	for(flag=0;flag < 512;flag++)
+	{
+		printf_hex(block[flag]);
+		if (!((flag + 1) % 32))
+			printf("\r\n");
+	}
+
+	return 0;
+}
+
 
 
 int main(void)
 {
-	uint32_t flag;
-	uint32_t f8 = 0;
 	uint16_t rca = 0;
-	uint32_t tmp;
 	uint32_t hcs;
 
 	rcc_clock_setup_hse_3v3(&hse_8mhz_3v3[CLOCK_3V3_168MHZ]);
@@ -300,11 +335,6 @@ int main(void)
 	else
 		return;
 
-	/*
-	printf_bin(SDIO_STA);
-	printf_bin(SDIO_RESP1);
-	*/
-
 	/* Enable Application commands */
 	printf("Enable application commands... (CMD55)\r\n");
 	sd_command(APP_CMD, SDIO_CMD_WAITRESP_SHORT, 0);
@@ -329,7 +359,7 @@ int main(void)
 
 		/* Sent HCS Flag if SDV2! */
 		sd_command(SD_APP_OP_COND, SDIO_CMD_WAITRESP_SHORT, hcs | (uint32_t)SDIO_OCR_32_33);
-	} while(SDIO_STA & SDIO_STA_CTIMEOUT || !(SDIO_RESP1 & SDIO_RESP1_READY));
+	} while (SDIO_STA & SDIO_STA_CTIMEOUT || !(SDIO_RESP1 & SDIO_RESP1_READY));
 
 	if(card1.type == SDV2)
 	{
@@ -353,60 +383,40 @@ int main(void)
 	/* Get card id */
 	printf("Get card id (CMD2)...\r\n");
 	sd_command(ALL_SEND_CID, SDIO_CMD_WAITRESP_LONG, 0);
-	printf_bin(SDIO_STA);
-	printf_bin(SDIO_RESP1);
-	printf_bin(SDIO_RESP2);
-	printf_bin(SDIO_RESP3);
-	printf_bin(SDIO_RESP4);
 
 
 	printf("Relative Addr (CMD3)...\r\n");
 	sd_command(SEND_RELATIVE_ADDR, SDIO_CMD_WAITRESP_SHORT, 0);
 	rca = SDIO_RESP1 >> 16;
-	printf_bin(SDIO_STA);
 
 	printf("Read specific information (CMD9)...\r\n");
 	sd_command(SEND_CSD, SDIO_CMD_WAITRESP_LONG, (rca << 16));
-	printf_bin(SDIO_STA);
 
 	/* Select the card... */
 	printf("Put the card in transfer mode (CMD7)...\r\n");
 	sd_command(SELECT_CARD, SDIO_CMD_WAITRESP_SHORT, (rca << 16));
-	printf_bin(SDIO_STA);
 
 	sd_command(APP_CMD, SDIO_CMD_WAITRESP_SHORT, (rca << 16));
 
 	printf("Set bus width (ACMD6)...\r\n");
 	sd_command(SET_BUS_WIDTH, SDIO_CMD_WAITRESP_SHORT, BUS_WIDTH_4);
-	printf_bin(SDIO_STA);
 
 	/* Raise Clock with to 1MHz */
 	sdio_set_clockdiv(0x2E); //Clock=48000/(46+2)=1MHz
 	sdio_set_buswidth(SDIO_CLKCR_WIDBUS_4);
 	sdio_enable_clock();
 
-	/* Set block len */
+	/* Set block len always to 512 bytes */
 	printf("Set block len (CMD16)...\r\n");
 	sd_command(SET_BLOCKLEN, SDIO_CMD_WAITRESP_SHORT, 0x200);
-	printf_bin(SDIO_STA);
 
-	printf("Read single block...\r\n");
-	sd_read_single_block(block, 0);
+	sd_read_single_block_blocking(0);
 
-	printf("Read finished...\r\n");
-	printf_bin(*((uint32_t *)block));
-
-
-	printf("The data:\r\n");
-
-	for(flag=0;flag< 512;flag++)
-		printf_hex(block[flag]);
+	sd_read_single_block_blocking(1);
 
 	while (1) {
 		__asm__("NOP");
 	}
-
-	return 0;
 }
 
 void usart2_isr(void)
