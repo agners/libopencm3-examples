@@ -271,8 +271,16 @@ int sd_read_single_block(uint8_t *buf, uint32_t blk)
 	sd_command(READ_SINGLE_BLOCK, SDIO_CMD_WAITRESP_SHORT, addr);
 
 	printf_bin(SDIO_STA);
-	while(!(SDIO_STA & SDIO_STA_DBCKEND)) ;
+	while(!(SDIO_STA & SDIO_STA_DBCKEND))
+	{
+		if (SDIO_STA & SDIO_STA_DTIMEOUT)
+		{
+			printf("Timeout!\r\n");
+			break;
+		}
+	}
 	printf_bin(SDIO_STA);
+	SDIO_ICR |= SDIO_ICR_DBCKENDC;
 }
 
 int sd_read_single_block_blocking(uint32_t blk)
