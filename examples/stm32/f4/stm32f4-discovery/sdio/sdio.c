@@ -41,7 +41,7 @@ struct card {
 struct card card1;
 uint8_t block[512];
 
-void printf(char* str)
+static void printf(char* str)
 {
 	while(*str)
 	{
@@ -50,7 +50,7 @@ void printf(char* str)
 	}
 }
 
-void printf_bin(uint32_t test)
+static void printf_bin(uint32_t test)
 {
 	int i = 1;
 	int k;
@@ -63,7 +63,8 @@ void printf_bin(uint32_t test)
 	}
 	printf("\r\n");
 }
-void printf_hex(uint8_t tohex)
+
+static void printf_hex(uint8_t tohex)
 {
 	char test[3];
 	uint8_t lower = tohex & 0x0f;
@@ -203,7 +204,7 @@ void dma2_stream3_isr(void)
 	}
 }
 
-int sd_start_transfer(uint8_t *buf, uint32_t cnt, uint32_t dir)
+static void sd_start_transfer(uint8_t *buf, uint32_t dir)
 {
 	/* Enable the DMA interrupt. */
 	nvic_enable_irq(NVIC_DMA2_STREAM3_IRQ);
@@ -214,7 +215,9 @@ int sd_start_transfer(uint8_t *buf, uint32_t cnt, uint32_t dir)
 
 	dma_set_peripheral_address(DMA2, DMA_STREAM3, (uint32_t)&SDIO_FIFO);
 	dma_set_memory_address(DMA2, DMA_STREAM3, (uint32_t)buf);
-	dma_set_number_of_data(DMA2, DMA_STREAM3, 0); /* Pheripherial control, therefore we don't need to set this */
+
+        /* Pheripherial control, therefore we don't need to set this */
+	dma_set_number_of_data(DMA2, DMA_STREAM3, 0);
 
 	/* Control Register */
 	dma_set_memory_burst(DMA2, DMA_STREAM3, DMA_SxCR_MBURST_INCR4);
@@ -251,7 +254,7 @@ int sd_start_transfer(uint8_t *buf, uint32_t cnt, uint32_t dir)
 
 
 
-int sd_read_single_block(uint8_t *buf, uint32_t blk)
+static int sd_read_single_block(uint8_t *buf, uint32_t blk)
 {
 	uint32_t addr;
 
@@ -263,7 +266,7 @@ int sd_read_single_block(uint8_t *buf, uint32_t blk)
 	sdio_data_timeout(20000); // 20000x1MHz = 20ms
 
 	/* Initialize DMA */
-	sd_start_transfer(buf, 512, DMA_SxCR_DIR_PERIPHERAL_TO_MEM);
+	sd_start_transfer(buf, DMA_SxCR_DIR_PERIPHERAL_TO_MEM);
 
 	/* Start DMA transfer on SDIO pheripherial */
 	sdio_start_block_transfer(512, SDIO_DCTRL_DBLOCKSIZE_9, SDIO_DCTRL_DTDIR_CARD_TO_CTRL, true);
@@ -275,20 +278,22 @@ int sd_read_single_block(uint8_t *buf, uint32_t blk)
 	while(!(SDIO_STA & SDIO_STA_DBCKEND))
 	{
 		if (SDIO_STA & SDIO_STA_DTIMEOUT)
-		{
-			printf("Timeout!\r\n");
-			break;
-		}
+                        return -1;
 	}
 	printf_bin(SDIO_STA);
 	SDIO_ICR |= SDIO_ICR_DBCKENDC;
+
+        return 0;
 }
 
-int sd_read_single_block_blocking(uint32_t blk)
+static void sd_read_single_block_blocking(uint32_t blk)
 {
 	uint32_t flag;
 	printf("Read single block...\r\n");
-	sd_read_single_block(block, blk);
+	if (sd_read_single_block(block, blk)) {
+                printf("Read single block timed out!\r\n");
+                return;
+        }
 
 	printf("Read finished...\r\n");
 	printf_bin(*((uint32_t *)block));
@@ -303,23 +308,13 @@ int sd_read_single_block_blocking(uint32_t blk)
 			printf("\r\n");
 	}
 
-	return 0;
+	return;
 }
 
-
-
-int main(void)
+static void sdio_init(void)
 {
 	uint16_t rca = 0;
 	uint32_t hcs;
-
-	rcc_clock_setup_hse_3v3(&hse_8mhz_3v3[CLOCK_3V3_168MHZ]);
-
-	clock_setup();
-	gpio_setup();
-	sdio_setup();
-	usart_setup();
-
 
 	printf("Go Idle state (CMD0)...\r\n");
 	sd_command(GO_IDLE_STATE, SDIO_CMD_WAITRESP_NO_0, 0);
@@ -418,6 +413,18 @@ int main(void)
 	/* Set block len always to 512 bytes */
 	printf("Set block len (CMD16)...\r\n");
 	sd_command(SET_BLOCKLEN, SDIO_CMD_WAITRESP_SHORT, 0x200);
+}
+
+int main(void)
+{
+	rcc_clock_setup_hse_3v3(&hse_8mhz_3v3[CLOCK_3V3_168MHZ]);
+
+	clock_setup();
+	gpio_setup();
+	sdio_setup();
+	usart_setup();
+
+	sdio_init();
 
 	sd_read_single_block_blocking(0);
 
@@ -456,4 +463,6 @@ void usart2_isr(void)
 		/* Disable the TXE interrupt as we don't need it anymore. */
 		usart_disable_tx_interrupt(USART3);
 	}
+
+        return;
 }
