@@ -45,7 +45,7 @@ void printf(char* str)
 {
 	while(*str)
 	{
-		usart_send_blocking(USART2, *str);
+		usart_send_blocking(USART3, *str);
 		str++;
 	}
 }
@@ -57,9 +57,9 @@ void printf_bin(uint32_t test)
 	for(k = 0; k<32;k++)
 	{
 		if((i << k) & test)
-			usart_send_blocking(USART2, '1');
+			usart_send_blocking(USART3, '1');
 		else
-			usart_send_blocking(USART2, '0');
+			usart_send_blocking(USART3, '0');
 	}
 	printf("\r\n");
 }
@@ -87,14 +87,15 @@ void printf_hex(uint8_t tohex)
 
 static void clock_setup(void)
 {
-	/* Enable GPIOD clock for LED & USARTs. */
-	/* Enable GPIO C/D clock for SDIO */
-	rcc_peripheral_enable_clock(&RCC_APB1ENR, RCC_APB1ENR_PWREN); /* ? */
+	rcc_peripheral_enable_clock(&RCC_APB1ENR, RCC_APB1ENR_PWREN);
 
-	rcc_peripheral_enable_clock(&RCC_AHB1ENR, RCC_AHB1ENR_IOPDEN);
-	rcc_peripheral_enable_clock(&RCC_AHB1ENR, RCC_AHB1ENR_IOPCEN);
-
+	/* Enable GPIO A/B clock for LED & USARTs. */
 	rcc_peripheral_enable_clock(&RCC_AHB1ENR, RCC_AHB1ENR_IOPAEN);
+	rcc_peripheral_enable_clock(&RCC_AHB1ENR, RCC_AHB1ENR_IOPBEN);
+
+	/* Enable GPIO C/D clock for SDIO */
+	rcc_peripheral_enable_clock(&RCC_AHB1ENR, RCC_AHB1ENR_IOPCEN);
+	rcc_peripheral_enable_clock(&RCC_AHB1ENR, RCC_AHB1ENR_IOPDEN);
 
 }
 
@@ -140,36 +141,36 @@ static void sdio_setup(void)
 
 static void usart_setup(void)
 {
-	/* Enable the USART2 interrupt. */
-//	nvic_enable_irq(NVIC_USART2_IRQ);
+	/* Enable clocks for USART3. */
+	rcc_peripheral_enable_clock(&RCC_APB1ENR, RCC_APB1ENR_USART3EN);
 
-	/* Setup GPIO pins for USART2 transmit. */
-	gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO2);
+	/* Enable the USART3 interrupt. */
+	//nvic_enable_irq(NVIC_USART3_IRQ);
 
-	/* Setup GPIO pins for USART2 receive. */
-	gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO3);
-	gpio_set_output_options(GPIOA, GPIO_OTYPE_OD, GPIO_OSPEED_25MHZ, GPIO3);
+	/* Setup GPIO pins for USART3 transmit. */
+        gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO10);
+	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO10);
 
-	/* Setup USART2 TX and RX pin as alternate function. */
-	gpio_set_af(GPIOA, GPIO_AF7, GPIO2);
-	gpio_set_af(GPIOA, GPIO_AF7, GPIO3);
+	/* Setup GPIO pins for USART3 receive. */
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_OD, GPIO_OSPEED_25MHZ, GPIO11);
+	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO11);
 
-	/* Enable clocks for USART2. */
-	rcc_peripheral_enable_clock(&RCC_APB1ENR, RCC_APB1ENR_USART2EN);
+	/* Setup USART3 TX and RX pin as alternate function. */
+	gpio_set_af(GPIOB, GPIO_AF7, GPIO10 | GPIO11);
 
-	/* Setup USART2 parameters. */
-	usart_set_baudrate(USART2, 38400);
-	usart_set_databits(USART2, 8);
-	usart_set_stopbits(USART2, USART_STOPBITS_1);
-	usart_set_mode(USART2, USART_MODE_TX_RX);
-	usart_set_parity(USART2, USART_PARITY_NONE);
-	usart_set_flow_control(USART2, USART_FLOWCONTROL_NONE);
+	/* Setup USART3 parameters. */
+	usart_set_baudrate(USART3, 115200);
+	usart_set_databits(USART3, 8);
+	usart_set_stopbits(USART3, USART_STOPBITS_1);
+	usart_set_mode(USART3, USART_MODE_TX_RX);
+	usart_set_parity(USART3, USART_PARITY_NONE);
+	usart_set_flow_control(USART3, USART_FLOWCONTROL_NONE);
 
-	/* Enable USART2 Receive interrupt. */
-//	usart_enable_rx_interrupt(USART2);
+	/* Enable USART3 Receive interrupt. */
+//	usart_enable_rx_interrupt(USART3);
 
 	/* Finally enable the USART. */
-	usart_enable(USART2);
+	usart_enable(USART3);
 }
 
 static void gpio_setup(void)
@@ -432,27 +433,27 @@ void usart2_isr(void)
 	static uint8_t data = 'A';
 
 	/* Check if we were called because of RXNE. */
-	if (((USART_CR1(USART2) & USART_CR1_RXNEIE) != 0) &&
-			((USART_SR(USART2) & USART_SR_RXNE) != 0)) {
+	if (((USART_CR1(USART3) & USART_CR1_RXNEIE) != 0) &&
+			((USART_SR(USART3) & USART_SR_RXNE) != 0)) {
 
 		/* Indicate that we got data. */
 		gpio_toggle(GPIOD, GPIO12);
 
 		/* Retrieve the data from the peripheral. */
-		data = usart_recv(USART2);
+		data = usart_recv(USART3);
 
 		/* Enable transmit interrupt so it sends back the data. */
-		usart_enable_tx_interrupt(USART2);
+		usart_enable_tx_interrupt(USART3);
 	}
 
 	/* Check if we were called because of TXE. */
-	if (((USART_CR1(USART2) & USART_CR1_TXEIE) != 0) &&
-			((USART_SR(USART2) & USART_SR_TXE) != 0)) {
+	if (((USART_CR1(USART3) & USART_CR1_TXEIE) != 0) &&
+			((USART_SR(USART3) & USART_SR_TXE) != 0)) {
 
 		/* Put data into the transmit register. */
-		usart_send(USART2, data);
+		usart_send(USART3, data);
 
 		/* Disable the TXE interrupt as we don't need it anymore. */
-		usart_disable_tx_interrupt(USART2);
+		usart_disable_tx_interrupt(USART3);
 	}
 }
