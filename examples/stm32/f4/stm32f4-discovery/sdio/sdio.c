@@ -252,7 +252,37 @@ static void sd_start_transfer(uint8_t *buf, uint32_t dir)
 	dma_enable_stream(DMA2, DMA_STREAM3);
 }
 
+static int sd_write_single_block(uint8_t *buf, uint32_t blk)
+{
+	uint32_t addr;
 
+	if(card1.type == SDV2HC)
+		addr = blk;
+	else
+		addr = blk * 512;
+
+	sdio_data_timeout(20000); // 20000x1MHz = 20ms
+
+	/* Initialize DMA */
+	sd_start_transfer(buf, DMA_SxCR_DIR_MEM_TO_PERIPHERAL);
+
+	/* Start DMA transfer on SDIO pheripherial */
+	sdio_start_block_transfer(512, SDIO_DCTRL_DBLOCKSIZE_9, SDIO_DCTRL_DTDIR_CTRL_TO_CARD, true);
+
+	/* CMD 24 */
+	sd_command(WRITE_BLOCK, SDIO_CMD_WAITRESP_SHORT, addr);
+
+	printf_bin(SDIO_STA);
+	while(!(SDIO_STA & SDIO_STA_DBCKEND))
+	{
+		if (SDIO_STA & SDIO_STA_DTIMEOUT)
+                        return -1;
+	}
+	printf_bin(SDIO_STA);
+	SDIO_ICR |= SDIO_ICR_DBCKENDC;
+
+	return 0;
+}
 
 static int sd_read_single_block(uint8_t *buf, uint32_t blk)
 {
@@ -284,31 +314,6 @@ static int sd_read_single_block(uint8_t *buf, uint32_t blk)
 	SDIO_ICR |= SDIO_ICR_DBCKENDC;
 
         return 0;
-}
-
-static void sd_read_single_block_blocking(uint32_t blk)
-{
-	uint32_t flag;
-	printf("Read single block...\r\n");
-	if (sd_read_single_block(block, blk)) {
-                printf("Read single block timed out!\r\n");
-                return;
-        }
-
-	printf("Read finished...\r\n");
-	printf_bin(*((uint32_t *)block));
-
-
-	printf("The data:\r\n");
-
-	for(flag=0;flag < 512;flag++)
-	{
-		printf_hex(block[flag]);
-		if (!((flag + 1) % 32))
-			printf("\r\n");
-	}
-
-	return;
 }
 
 static void sdio_init(void)
@@ -415,6 +420,34 @@ static void sdio_init(void)
 	sd_command(SET_BLOCKLEN, SDIO_CMD_WAITRESP_SHORT, 0x200);
 }
 
+static int sdio_read_write_test(int blocknbr)
+{
+	uint32_t flag;
+
+	printf("Read single block...\r\n");
+	if (sd_read_single_block(block, blocknbr)) {
+                printf("Read single block timed out!\r\n");
+                return -1;
+        }
+	printf("Read finished...\r\n");
+	printf_bin(*((uint32_t *)block));
+
+	printf("The data:\r\n");
+
+	for(flag=0;flag < 512;flag++)
+	{
+		printf_hex(block[flag]);
+		if (!((flag + 1) % 32))
+			printf("\r\n");
+	}
+
+	block[0] = 0xaf;
+
+	sd_write_single_block(block, blocknbr);
+
+	return 0;
+}
+
 int main(void)
 {
 	rcc_clock_setup_hse_3v3(&hse_8mhz_3v3[CLOCK_3V3_168MHZ]);
@@ -426,9 +459,7 @@ int main(void)
 
 	sdio_init();
 
-	sd_read_single_block_blocking(0);
-
-	sd_read_single_block_blocking(1);
+	sdio_read_write_test(0);
 
 	while (1) {
 		__asm__("NOP");
