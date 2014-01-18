@@ -18,6 +18,9 @@
  */
 
 #define DEBUG
+#include <stdio.h>
+#include <errno.h>
+
 #include <libopencm3/stm32/f4/rcc.h>
 #include <libopencm3/stm32/f4/gpio.h>
 #include <libopencm3/stm32/f4/dma.h>
@@ -41,13 +44,20 @@ struct card {
 struct card card1;
 uint8_t block[512];
 
-static void printf(char* str)
+int _write(int file, char *ptr, int len);
+
+int _write(int file, char *ptr, int len)
 {
-	while(*str)
-	{
-		usart_send_blocking(USART3, *str);
-		str++;
+	int i;
+
+	if (file == 1) {
+		for (i = 0; i < len; i++)
+			usart_send_blocking(USART3, ptr[i]);
+		return i;
 	}
+
+	errno = EIO;
+	return -1;
 }
 
 static void printf_bin(uint32_t test)
@@ -63,28 +73,6 @@ static void printf_bin(uint32_t test)
 	}
 	printf("\r\n");
 }
-
-static void printf_hex(uint8_t tohex)
-{
-	char test[3];
-	uint8_t lower = tohex & 0x0f;
-	uint8_t upper = tohex >> 4;
-
-	if(upper <10)
-		test[0] = '0' + upper;
-	else
-		test[0] = 'a' + upper - 10;
-
-	if(lower <10)
-		test[1] = '0' + lower;
-	else
-		test[1] = 'a' + lower - 10;
-
-	test[2] = '\0';
-
-	printf(test);
-}
-
 
 static void clock_setup(void)
 {
@@ -184,22 +172,22 @@ void dma2_stream3_isr(void)
 {
 	if (dma_get_interrupt_flag(DMA2, DMA_STREAM3, DMA_TCIF))
 	{
-		printf("Stream 3 completed");
+		printf("Stream 3 completed\r\n");
 		dma_clear_interrupt_flags(DMA2, DMA_STREAM3, DMA_TCIF);
 	}
 	else if (dma_get_interrupt_flag(DMA2, DMA_STREAM3, DMA_HTIF))
 	{
-		printf("Stream 3 half");
+		printf("Stream 3 half\r\n");
 		dma_clear_interrupt_flags(DMA2, DMA_STREAM3, DMA_HTIF);
 	}
 	else if (dma_get_interrupt_flag(DMA2, DMA_STREAM3, DMA_TEIF))
 	{
-		printf("Stream 3 error");
+		printf("Stream 3 error\r\n");
 		dma_clear_interrupt_flags(DMA2, DMA_STREAM3, DMA_TEIF);
 	}
 	else if (dma_get_interrupt_flag(DMA2, DMA_STREAM3, DMA_DMEIF))
 	{
-		printf("Stream 3 fifo error");
+		printf("Stream 3 fifo error\r\n");
 		dma_clear_interrupt_flags(DMA2, DMA_STREAM3, DMA_DMEIF);
 	}
 }
@@ -422,7 +410,7 @@ static void sdio_init(void)
 
 static int sdio_read_write_test(int blocknbr)
 {
-	uint32_t flag;
+	int i, j;
 
 	printf("Read single block...\r\n");
 	if (sd_read_single_block(block, blocknbr)) {
@@ -434,13 +422,14 @@ static int sdio_read_write_test(int blocknbr)
 
 	printf("The data:\r\n");
 
-	for(flag=0;flag < 512;flag++)
+	/* print 32 x 1 byte in a line (1 byte == 2 hex characters) */
+	/* print 1 int at a time, 8 in a row... */
+	for (i = 0; i < 512/(8*4); i++)
 	{
-		printf_hex(block[flag]);
-		if (!((flag + 1) % 32))
-			printf("\r\n");
+		for (j = 0; j < 8; j++)
+			printf("%08x ", *(unsigned int *)&block[(i * 8 + j) * 4]);
+		printf("\r\n");
 	}
-
 	block[0] = 0xaf;
 
 	sd_write_single_block(block, blocknbr);
