@@ -416,15 +416,31 @@ static void sdio_init(void)
 	sd_command(SET_BLOCKLEN, SDIO_CMD_WAITRESP_SHORT, 0x200);
 }
 
+static void print_buffer(uint8_t *buffer, int size)
+{
+	int i, j, k;
+	for (i = 0; i < size / 32; i++)
+	{
+		for (j = 0; j < 8; j++) {
+			for (k = 0; k < 4; k++)
+				printf("%02x", buffer[i * 32 + j * 4 + k]);
+			printf(" ");
+		}
+		printf("\r\n");
+	}
+}
+
 static int sdio_read_write_test(int blocknbr)
 {
-	int i, j;
+	int i;
+	uint8_t data = 0;
 
 	printf("Read single block...\r\n");
 	if (sd_read_single_block(block, blocknbr)) {
-                printf("Read single block timed out!\r\n");
-                return -1;
-        }
+		printf("Read single block timed out!\r\n");
+			return -1;
+	}
+
 	printf("Read finished...\r\n");
 	printf_bin(*((uint32_t *)block));
 
@@ -432,13 +448,10 @@ static int sdio_read_write_test(int blocknbr)
 
 	/* print 32 x 1 byte in a line (1 byte == 2 hex characters) */
 	/* print 1 int at a time, 8 in a row... */
-	for (i = 0; i < 512/(8*4); i++)
-	{
-		for (j = 0; j < 8; j++)
-			printf("%08x ", *(unsigned int *)&block[(i * 8 + j) * 4]);
-		printf("\r\n");
-	}
-	block[0] = 0xaf;
+	print_buffer(block, 512);
+
+	for (i = 0; i < 512; i++)
+		block[i] = data++;
 
 	sd_write_single_block(block, blocknbr);
 
