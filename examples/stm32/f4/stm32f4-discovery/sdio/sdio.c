@@ -185,15 +185,22 @@ void dma2_stream3_isr(void)
 		printf("Stream 3 error\r\n");
 		dma_clear_interrupt_flags(DMA2, DMA_STREAM3, DMA_TEIF);
 	}
-	else if (dma_get_interrupt_flag(DMA2, DMA_STREAM3, DMA_DMEIF))
+	else if (dma_get_interrupt_flag(DMA2, DMA_STREAM3, DMA_FEIF))
 	{
 		printf("Stream 3 fifo error\r\n");
+		dma_clear_interrupt_flags(DMA2, DMA_STREAM3, DMA_FEIF);
+	}
+	else if (dma_get_interrupt_flag(DMA2, DMA_STREAM3, DMA_DMEIF))
+	{
+		printf("Stream 3 direct memory error\r\n");
 		dma_clear_interrupt_flags(DMA2, DMA_STREAM3, DMA_DMEIF);
 	}
 }
 
 static void sd_start_transfer(uint8_t *buf, uint32_t dir)
 {
+	dma_disable_stream(DMA2, DMA_STREAM3);
+
 	/* Enable the DMA interrupt. */
 	nvic_enable_irq(NVIC_DMA2_STREAM3_IRQ);
 
