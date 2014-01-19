@@ -261,11 +261,12 @@ static int sd_write_single_block(uint8_t *buf, uint32_t blk)
 	/* Initialize DMA */
 	sd_start_transfer(buf, DMA_SxCR_DIR_MEM_TO_PERIPHERAL);
 
-	/* Start DMA transfer on SDIO pheripherial */
-	sdio_start_block_transfer(512, SDIO_DCTRL_DBLOCKSIZE_9, SDIO_DCTRL_DTDIR_CTRL_TO_CARD, true);
-
 	/* CMD 24 */
 	sd_command(WRITE_BLOCK, SDIO_CMD_WAITRESP_SHORT, addr);
+
+	/* Start DMA transfer on SDIO pheripherial */
+	printf("sdio_start_block_transfer\r\n");
+	sdio_start_block_transfer(512, SDIO_DCTRL_DBLOCKSIZE_9, SDIO_DCTRL_DTDIR_CTRL_TO_CARD, true);
 
 	printf_bin(SDIO_STA);
 	while(!(SDIO_STA & SDIO_STA_DBCKEND))
