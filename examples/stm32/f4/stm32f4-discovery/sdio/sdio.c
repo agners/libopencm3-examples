@@ -17,7 +17,10 @@
  * along with this library. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#define STM32F4DISCOVERY
+
 #define DEBUG
+
 #include <stdio.h>
 #include <errno.h>
 
@@ -122,6 +125,13 @@ static void sdio_setup(void)
 	gpio_set_af(GPIOC, GPIO_AF12, GPIO10);
 	gpio_set_af(GPIOC, GPIO_AF12, GPIO11);
 	gpio_set_output_options(GPIOC, GPIO_OTYPE_PP, GPIO_OSPEED_25MHZ, GPIO8 | GPIO9 | GPIO10 | GPIO11);
+
+#ifndef STM32F4DISCOVERY
+	/* Enable power */
+	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO8);
+	gpio_set_output_options(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_25MHZ, GPIO8);
+	gpio_set(GPIOA, GPIO8);
+#endif
 
 	/* Enable CLK */
 	gpio_mode_setup(GPIOC, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO12);
@@ -441,7 +451,8 @@ static void sdio_init(void)
 	sd_command(SET_BUS_WIDTH, SDIO_CMD_WAITRESP_SHORT, BUS_WIDTH_4);
 
 	/* Raise Clock with to 1MHz */
-	sdio_set_clockdiv(0x2E); //Clock=48000/(46+2)=1MHz
+	//sdio_set_clockdiv(0x2E); //Clock=48000/(46+2)=1MHz
+	sdio_set_clockdiv(0x0); //Clock=48000/(46+2)=1MHz
 	sdio_set_buswidth(SDIO_CLKCR_WIDBUS_4);
 	sdio_enable_clock();
 
@@ -466,7 +477,7 @@ static void print_buffer(uint8_t *buffer, int size)
 
 static int sdio_read_write_test(int blocknbr)
 {
-	int i;
+	int i, j;
 	uint8_t data = 0;
 
 	printf("Read single block...\r\n");
@@ -483,18 +494,49 @@ static int sdio_read_write_test(int blocknbr)
 	/* print 32 x 1 byte in a line (1 byte == 2 hex characters) */
 	/* print 1 int at a time, 8 in a row... */
 	print_buffer(block, 512);
-
 	for (i = 0; i < 512; i++)
-		block[i] = data++;
-
-	sd_write_single_block(block, blocknbr);
+		block[i] = 0xff;
+	for (j = 0; j < 26214400; j++){
+		DEBUG_PRINT("===== Writing block %d\r\n", j);
+		sd_write_single_block(block, j);
+		printf("#");
+		fflush(stdout);
+	}
+	printf("Finished!\r\n");
+		//block[i] = data++;
 
 	return 0;
 }
 
+#ifdef STM32F4DISCOVERY
+# define OSC_FREQ  8  // Discovery board has 8 MHz external clock
+#else
+# define OSC_FREQ  30 // hw-0.30 has 30 MHz external clock
+#endif
+
+static const clock_scale_t clock_set =
+{
+  .pllm = OSC_FREQ,
+  .plln = 336,
+  .pllp = 2,
+  .pllq = 7,
+  .hpre = RCC_CFGR_HPRE_DIV_NONE,
+  .ppre1 = RCC_CFGR_PPRE_DIV_4,
+  .ppre2 = RCC_CFGR_PPRE_DIV_2,
+  .power_save = 0,
+  .flash_config = FLASH_ACR_ICE | FLASH_ACR_DCE | FLASH_ACR_LATENCY_5WS,
+  .apb1_frequency = 42000000,
+  .apb2_frequency = 84000000,
+};
+
+
 int main(void)
 {
+#ifdef STM32F4DISCOVERY
 	rcc_clock_setup_hse_3v3(&hse_8mhz_3v3[CLOCK_3V3_168MHZ]);
+#else
+	rcc_clock_setup_hse_3v3(&clock_set);
+#endif
 
 	clock_setup();
 	gpio_setup();

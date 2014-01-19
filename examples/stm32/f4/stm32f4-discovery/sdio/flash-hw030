@@ -1,0 +1,1 @@
+sudo openocd -f /home/sag/Projects/NG-UAVP/sources/sources/ngos/conf/jtag/interface/uavp-ng-ftdi-jtag.cfg -f /home/sag/Projects/NG-UAVP/sources/sources/ngos/conf/jtag/openocd-stm32f4-fc.cfg -f /home/sag/Projects/NG-UAVP/sources/sources/ngos/conf/jtag/target/uavp-ng-hw-0.30.conf -c "init" -c "flash_it sdio.hex 0"
