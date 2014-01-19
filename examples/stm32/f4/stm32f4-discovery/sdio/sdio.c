@@ -44,7 +44,7 @@ enum sdtype {
 
 struct card {
 	enum sdtype type;
-	uint16_t rca;
+	uint32_t rca;
 };
 
 struct card card1;
@@ -315,12 +315,11 @@ static int sd_read_single_block(uint8_t *buf, uint32_t blk)
 	printf_bin(SDIO_STA);
 	SDIO_ICR |= SDIO_ICR_DBCKENDC;
 
-        return 0;
+	return 0;
 }
 
 static void sdio_init(void)
 {
-	uint16_t rca = 0;
 	uint32_t hcs;
 
 	printf("Go Idle state (CMD0)...\r\n");
@@ -398,16 +397,16 @@ static void sdio_init(void)
 
 	printf("Relative Addr (CMD3)...\r\n");
 	sd_command(SEND_RELATIVE_ADDR, SDIO_CMD_WAITRESP_SHORT, 0);
-	rca = SDIO_RESP1 >> 16;
+	card1.rca = SDIO_RESP1 & 0xFFFF0000;
 
 	printf("Read specific information (CMD9)...\r\n");
-	sd_command(SEND_CSD, SDIO_CMD_WAITRESP_LONG, (rca << 16));
+	sd_command(SEND_CSD, SDIO_CMD_WAITRESP_LONG, card1.rca);
 
 	/* Select the card... */
 	printf("Put the card in transfer mode (CMD7)...\r\n");
-	sd_command(SELECT_CARD, SDIO_CMD_WAITRESP_SHORT, (rca << 16));
+	sd_command(SELECT_CARD, SDIO_CMD_WAITRESP_SHORT, card1.rca);
 
-	sd_command(APP_CMD, SDIO_CMD_WAITRESP_SHORT, (rca << 16));
+	sd_command(APP_CMD, SDIO_CMD_WAITRESP_SHORT, card1.rca);
 
 	printf("Set bus width (ACMD6)...\r\n");
 	sd_command(SET_BUS_WIDTH, SDIO_CMD_WAITRESP_SHORT, BUS_WIDTH_4);
