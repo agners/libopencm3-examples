@@ -30,6 +30,12 @@
 #include <libopencm3/stm32/f4/flash.h>
 #include "sd.h"
 
+#ifdef DEBUG
+#define DEBUG_PRINT(fmt, args...)    printf(fmt, ## args)
+#else
+#define DEBUG_PRINT(fmt, args...)    /* Don't do anything in release builds */
+#endif
+
 enum sdtype {
 	SD, /* SD Standard capacity (legancy) */
 	SDV2, /* SD Normal capacity (V 2.00) */
@@ -172,27 +178,27 @@ void dma2_stream3_isr(void)
 {
 	if (dma_get_interrupt_flag(DMA2, DMA_STREAM3, DMA_TCIF))
 	{
-		printf("Stream 3 completed\r\n");
+		DEBUG_PRINT("Stream 3 completed\r\n");
 		dma_clear_interrupt_flags(DMA2, DMA_STREAM3, DMA_TCIF);
 	}
 	else if (dma_get_interrupt_flag(DMA2, DMA_STREAM3, DMA_HTIF))
 	{
-		printf("Stream 3 half\r\n");
+		DEBUG_PRINT("Stream 3 half\r\n");
 		dma_clear_interrupt_flags(DMA2, DMA_STREAM3, DMA_HTIF);
 	}
 	else if (dma_get_interrupt_flag(DMA2, DMA_STREAM3, DMA_TEIF))
 	{
-		printf("Stream 3 error\r\n");
+		DEBUG_PRINT("Stream 3 error\r\n");
 		dma_clear_interrupt_flags(DMA2, DMA_STREAM3, DMA_TEIF);
 	}
 	else if (dma_get_interrupt_flag(DMA2, DMA_STREAM3, DMA_FEIF))
 	{
-		printf("Stream 3 fifo error\r\n");
+		DEBUG_PRINT("Stream 3 fifo error\r\n");
 		dma_clear_interrupt_flags(DMA2, DMA_STREAM3, DMA_FEIF);
 	}
 	else if (dma_get_interrupt_flag(DMA2, DMA_STREAM3, DMA_DMEIF))
 	{
-		printf("Stream 3 direct memory error\r\n");
+		DEBUG_PRINT("Stream 3 direct memory error\r\n");
 		dma_clear_interrupt_flags(DMA2, DMA_STREAM3, DMA_DMEIF);
 	}
 }
@@ -259,22 +265,22 @@ static int sd_write_single_block(uint8_t *buf, uint32_t blk)
 	sdio_data_timeout(20000); // 20000x1MHz = 20ms
 
 	/* Initialize DMA */
+	DEBUG_PRINT("sd_start_transfer\r\n");
 	sd_start_transfer(buf, DMA_SxCR_DIR_MEM_TO_PERIPHERAL);
 
 	/* CMD 24 */
+	DEBUG_PRINT("sd_command\r\n");
 	sd_command(WRITE_BLOCK, SDIO_CMD_WAITRESP_SHORT, addr);
 
 	/* Start DMA transfer on SDIO pheripherial */
-	printf("sdio_start_block_transfer\r\n");
+	DEBUG_PRINT("sdio_start_block_transfer\r\n");
 	sdio_start_block_transfer(512, SDIO_DCTRL_DBLOCKSIZE_9, SDIO_DCTRL_DTDIR_CTRL_TO_CARD, true);
 
-	printf_bin(SDIO_STA);
 	while(!(SDIO_STA & SDIO_STA_DBCKEND))
 	{
 		if (SDIO_STA & SDIO_STA_DTIMEOUT)
                         return -1;
 	}
-	printf_bin(SDIO_STA);
 	SDIO_ICR |= SDIO_ICR_DBCKENDC;
 
 	return 0;
