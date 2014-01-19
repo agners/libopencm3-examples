@@ -42,6 +42,20 @@ enum sdtype {
 	SDV2HC, /* SD High capacity (V 2.00) */
 };
 
+enum sd_state
+{
+	SD_STATE_UNKNOWN = -1,
+	SD_STATE_IDLE    = 0,
+	SD_STATE_READY   = 1,
+	SD_STATE_IDENT   = 2,
+	SD_STATE_STBY    = 3,
+	SD_STATE_TRAN    = 4,
+	SD_STATE_DATA    = 5,
+	SD_STATE_RCV     = 6,
+	SD_STATE_PRG     = 7,
+	SD_STATE_DIS     = 8
+};
+
 struct card {
 	enum sdtype type;
 	uint32_t rca;
@@ -253,6 +267,17 @@ static void sd_start_transfer(uint8_t *buf, uint32_t dir)
 	dma_enable_stream(DMA2, DMA_STREAM3);
 }
 
+static int sd_check_status()
+{
+	enum sd_state state;
+	do {
+		sd_command(SEND_STATUS, SDIO_CMD_WAITRESP_SHORT, card1.rca);
+		state = (SDIO_RESP1 >> 9) & 0xf;
+	} while (state != SD_STATE_TRAN);
+
+	return 0;
+}
+
 static int sd_write_single_block(uint8_t *buf, uint32_t blk)
 {
 	uint32_t addr;
@@ -261,6 +286,8 @@ static int sd_write_single_block(uint8_t *buf, uint32_t blk)
 		addr = blk;
 	else
 		addr = blk * 512;
+
+	sd_check_status();
 
 	sdio_data_timeout(20000); // 20000x1MHz = 20ms
 
@@ -294,6 +321,8 @@ static int sd_read_single_block(uint8_t *buf, uint32_t blk)
 		addr = blk;
 	else
 		addr = blk * 512;
+
+	sd_check_status();
 
 	sdio_data_timeout(20000); // 20000x1MHz = 20ms
 
