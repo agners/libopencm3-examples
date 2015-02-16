@@ -231,20 +231,15 @@ static void sd_start_transfer(uint8_t *buf, uint32_t dir)
 	dma_set_peripheral_address(DMA2, DMA_STREAM3, (uint32_t)&SDIO_FIFO);
 	dma_set_memory_address(DMA2, DMA_STREAM3, (uint32_t)buf);
 
-        /* Pheripherial control, therefore we don't need to set this */
-	dma_set_number_of_data(DMA2, DMA_STREAM3, 0);
-
 	/* Control Register */
-	dma_set_memory_burst(DMA2, DMA_STREAM3, DMA_SxCR_MBURST_INCR4);
+	dma_set_memory_burst(DMA2, DMA_STREAM3, DMA_SxCR_MBURST_SINGLE);
 	dma_set_peripheral_burst(DMA2, DMA_STREAM3, DMA_SxCR_PBURST_INCR4);
 	dma_disable_double_buffer_mode(DMA2, DMA_STREAM3);
 	dma_set_priority(DMA2, DMA_STREAM3, DMA_SxCR_PL_VERY_HIGH);
-	dma_disable_peripheral_increment_mode(DMA2, DMA_STREAM3);
 	dma_set_memory_size(DMA2, DMA_STREAM3, DMA_SxCR_MSIZE_32BIT);
 	dma_set_peripheral_size(DMA2, DMA_STREAM3, DMA_SxCR_PSIZE_32BIT);
 	dma_enable_memory_increment_mode(DMA2, DMA_STREAM3);
 	dma_disable_peripheral_increment_mode(DMA2, DMA_STREAM3);
-	/* Don't use circular mode */
 	dma_set_peripheral_flow_control(DMA2, DMA_STREAM3);
 
 	dma_enable_transfer_error_interrupt(DMA2, DMA_STREAM3);
@@ -252,9 +247,8 @@ static void sd_start_transfer(uint8_t *buf, uint32_t dir)
 	dma_enable_fifo_error_interrupt(DMA2, DMA_STREAM3);
 
 	/* FIFO Control Register */
-	//dma_disable_fifo_error_interrupt(DMA2, DMA_STREAM3);
 	dma_enable_fifo_mode(DMA2, DMA_STREAM3);
-	dma_set_fifo_threshold(DMA2, DMA_STREAM3, DMA_SxFCR_FTH_4_4_FULL);
+	dma_set_fifo_threshold(DMA2, DMA_STREAM3, DMA_SxFCR_FTH_1_4_FULL);
 
 	/* Direction according to parameter... */
 	dma_set_transfer_mode(DMA2, DMA_STREAM3, dir);
