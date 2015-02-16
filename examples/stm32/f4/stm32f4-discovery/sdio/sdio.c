@@ -85,13 +85,13 @@ static void printf_bin(uint32_t test)
 {
 	int i = 1;
 	int k;
-	for(k = 0; k<32;k++)
-	{
+	for (k = 31; k>=0; k--) {
 		if((i << k) & test)
 			usart_send_blocking(USART3, '1');
 		else
 			usart_send_blocking(USART3, '0');
 	}
+
 	printf("\r\n");
 }
 
