@@ -20,15 +20,28 @@ struct resp4 {
   uint32_t io_ocr : 24; /* Operation condition register */
 };
 
-uint32_t sd_command(uint32_t cmd, uint32_t resp, uint32_t arg);
+#define ETIMEOUT	(-1)
+#define ECRCERR		(-2)
+
+int sd_command(uint32_t cmd, uint32_t resp, uint32_t arg);
 uint32_t sd_response(uint32_t *response, uint32_t type);
 
-#define RESP_R1       (0x01)
-#define RESP_R1b      (0x02)
-#define RESP_R2       (0x03)
-#define RESP_R3       (0x04)
-#define RESP_R6       (0x05)
-#define RESP_R7       (0x06)
+#define MMC_RSP_PRESENT	(1 << 0)
+#define MMC_RSP_LONG	(1 << 1)
+#define MMC_RSP_CRC	(1 << 2)
+#define MMC_RSP_BUSY	(1 << 3)
+#define MMC_RSP_OPCODE	(1 << 4)
+
+#define MMC_RSP_NONE	(0)
+#define MMC_RSP_R1	(MMC_RSP_PRESENT|MMC_RSP_CRC|MMC_RSP_OPCODE)
+#define MMC_RSP_R1B	(MMC_RSP_PRESENT|MMC_RSP_CRC|MMC_RSP_OPCODE|MMC_RSP_BUSY)
+#define MMC_RSP_R2	(MMC_RSP_PRESENT|MMC_RSP_LONG|MMC_RSP_CRC)
+#define MMC_RSP_R3	(MMC_RSP_PRESENT)
+#define MMC_RSP_R4	(MMC_RSP_PRESENT|MMC_RSP_CRC|MMC_RSP_OPCODE)
+#define MMC_RSP_R4B	(MMC_RSP_PRESENT|MMC_RSP_CRC|MMC_RSP_OPCODE)
+#define MMC_RSP_R5	(MMC_RSP_PRESENT|MMC_RSP_CRC|MMC_RSP_OPCODE)
+#define MMC_RSP_R6	(MMC_RSP_PRESENT|MMC_RSP_CRC|MMC_RSP_OPCODE)
+#define MMC_RSP_R7	(MMC_RSP_PRESENT|MMC_RSP_CRC|MMC_RSP_OPCODE)
 
 #define SDIO_RESP1_READY (0x1 << 31)
 

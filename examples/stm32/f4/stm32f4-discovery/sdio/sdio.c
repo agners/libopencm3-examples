@@ -261,11 +261,11 @@ static void sd_start_transfer(uint8_t *buf, uint32_t dir)
 	dma_enable_stream(DMA2, DMA_STREAM3);
 }
 
-static int sd_check_status()
+static int sd_check_status(void)
 {
 	enum sd_state state;
 	do {
-		sd_command(SEND_STATUS, SDIO_CMD_WAITRESP_SHORT, card1.rca);
+		sd_command(SEND_STATUS, MMC_RSP_R1, card1.rca);
 		state = (SDIO_RESP1 >> 9) & 0xf;
 	} while (state != SD_STATE_TRAN);
 
@@ -274,7 +274,7 @@ static int sd_check_status()
 
 static int sd_write_single_block(uint8_t *buf, uint32_t blk)
 {
-	uint32_t addr, sta;
+	uint32_t addr;
 
 	if(card1.type == SDV2HC)
 		addr = blk;
@@ -291,8 +291,7 @@ static int sd_write_single_block(uint8_t *buf, uint32_t blk)
 
 	/* CMD 24 */
 	DEBUG_PRINT("sd_command\r\n");
-	sta = sd_command(WRITE_BLOCK, SDIO_CMD_WAITRESP_SHORT, addr);
-	printf_bin(sta);
+	sd_command(WRITE_BLOCK, MMC_RSP_R1, addr);
 
 	/* Start DMA transfer on SDIO pheripherial */
 	DEBUG_PRINT("sdio_start_block_transfer\r\n");
@@ -329,7 +328,7 @@ static int sd_read_single_block(uint8_t *buf, uint32_t blk)
 	sdio_start_block_transfer(512, SDIO_DCTRL_DBLOCKSIZE_9, SDIO_DCTRL_DTDIR_CARD_TO_CTRL, true);
 
 	/* CMD 17 */
-	sd_command(READ_SINGLE_BLOCK, SDIO_CMD_WAITRESP_SHORT, addr);
+	sd_command(READ_SINGLE_BLOCK, MMC_RSP_R1, addr);
 
 	printf_bin(SDIO_STA);
 	while(!(SDIO_STA & SDIO_STA_DBCKEND))
@@ -345,41 +344,39 @@ static int sd_read_single_block(uint8_t *buf, uint32_t blk)
 
 static void sdio_init(void)
 {
-	uint32_t hcs, sta;
+	int ret;
+	uint32_t hcs;
 
 	printf("Go Idle state (CMD0)...\r\n");
-	sta = sd_command(GO_IDLE_STATE, SDIO_CMD_WAITRESP_NO_0, 0);
-	printf_bin(sta);
+	sd_command(GO_IDLE_STATE, MMC_RSP_NONE, 0);
 
-	//printf_bin(SDIO_STA);
 	printf("Send if condition (CMD8)...\r\n");
-	sta = sd_command(SEND_IF_COND, SDIO_CMD_WAITRESP_SHORT, 0x000001AA);
+	ret = sd_command(SEND_IF_COND, MMC_RSP_R7, 0x000001AA);
 
-	/* Legancy SD if this command does not answer... */
-	if (sta & SDIO_STA_CTIMEOUT) {
-		printf("Card type: SD\n");
+	/* No or Legancy SD if this command does not answer... */
+	if (ret == ETIMEOUT) {
 		card1.type = SD;
-	} else if(sta & SDIO_STA_CMDREND) {
-		printf("Card type: SDV2 or higher\n");
+	} else if (!ret) {
 		/* We set Rsv too, seems to be needed on some cards */
-		hcs = 0x40000000; // | 0x80000000;
+		hcs = 0x40000000;
 		card1.type = SDV2;
 	} else {
+		printf("Error on if condition\n");
 		return;
 	}
 
 	/* Enable Application commands */
 	printf("Enable application commands... (CMD55)\r\n");
-	sta = sd_command(APP_CMD, SDIO_CMD_WAITRESP_SHORT, 0);
-	printf_bin(sta);
-
+	ret = sd_command(APP_CMD, MMC_RSP_R1, 0);
 
 	/* The card should now be in app cmd mode... */
-	if(!(SDIO_RESP1 & SDIO_CRDST_APP_CMD) && SDIO_STA && SDIO_STA_CTIMEOUT)
+	if(!(SDIO_RESP1 & SDIO_CRDST_APP_CMD) || ret == ETIMEOUT) {
+		printf("Timed out changing to application mode\n");
 		return;
+	}
 
-	/* Operation Condition, ignore CRC since ACMD41 is R3 type => no CRC */
-	sta = sd_command(SD_APP_OP_COND, SDIO_CMD_WAITRESP_SHORT, 0);
+	/* Get operation condition */
+	sd_command(SD_APP_OP_COND, MMC_RSP_R3, 0);
 
 	/* The card has to support 3.3V, if not, exit... */
 	if(!(SDIO_RESP1 & SDIO_OCR_32_33)) {
@@ -391,11 +388,11 @@ static void sdio_init(void)
 	/* Set Operation Condition, wait until ready... */
 	do {
 		/* Application command */
-		sta = sd_command(APP_CMD, SDIO_CMD_WAITRESP_SHORT, 0);
+		sd_command(APP_CMD, MMC_RSP_R1, 0);
 
 		/* Sent HCS Flag if SDV2! */
-		sta = sd_command(SD_APP_OP_COND, SDIO_CMD_WAITRESP_SHORT, hcs | (uint32_t)SDIO_OCR_32_33);
-	} while (sta & SDIO_STA_CTIMEOUT || !(SDIO_RESP1 & SDIO_RESP1_READY));
+		ret = sd_command(SD_APP_OP_COND, MMC_RSP_R3, hcs | SDIO_OCR_32_33);
+	} while (ret == ETIMEOUT || !(SDIO_RESP1 & SDIO_RESP1_READY));
 
 
 	if (card1.type == SDV2) {
@@ -417,24 +414,24 @@ static void sdio_init(void)
 
 	/* Get card id */
 	printf("Get card id (CMD2)...\r\n");
-	sd_command(ALL_SEND_CID, SDIO_CMD_WAITRESP_LONG, 0);
+	sd_command(ALL_SEND_CID, MMC_RSP_R2, 0);
 
 
 	printf("Relative Addr (CMD3)...\r\n");
-	sd_command(SEND_RELATIVE_ADDR, SDIO_CMD_WAITRESP_SHORT, 0);
+	sd_command(SEND_RELATIVE_ADDR, MMC_RSP_R6, 0);
 	card1.rca = SDIO_RESP1 & 0xFFFF0000;
 
 	printf("Read specific information (CMD9)...\r\n");
-	sd_command(SEND_CSD, SDIO_CMD_WAITRESP_LONG, card1.rca);
+	sd_command(SEND_CSD, MMC_RSP_R2, card1.rca);
 
 	/* Select the card... */
 	printf("Put the card in transfer mode (CMD7)...\r\n");
-	sd_command(SELECT_CARD, SDIO_CMD_WAITRESP_SHORT, card1.rca);
+	sd_command(SELECT_CARD, MMC_RSP_R1B, card1.rca);
 
-	sd_command(APP_CMD, SDIO_CMD_WAITRESP_SHORT, card1.rca);
+	sd_command(APP_CMD, MMC_RSP_R1, card1.rca);
 
 	/* Set bus width (ACMD6)... */
-	sd_command(SET_BUS_WIDTH, SDIO_CMD_WAITRESP_SHORT, BUS_WIDTH_4);
+	sd_command(SET_BUS_WIDTH, MMC_RSP_R1, BUS_WIDTH_4);
 
 	/* Raise Clock with to 1MHz */
 	sdio_set_clockdiv(0x2E); //Clock=48000/(46+2)=1MHz
@@ -442,7 +439,7 @@ static void sdio_init(void)
 	sdio_enable_clock();
 
 	/* Set block len (CMD16) */
-	sd_command(SET_BLOCKLEN, SDIO_CMD_WAITRESP_SHORT, 512);
+	sd_command(SET_BLOCKLEN, MMC_RSP_R1, 512);
 }
 
 static void print_buffer(uint8_t *buffer, int size)
