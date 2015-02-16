@@ -19,11 +19,12 @@
 
 #define DEBUG
 #include <stdio.h>
+#include <stdint.h>
 #include <errno.h>
 
-#include <libopencm3/stm32/f4/rcc.h>
-#include <libopencm3/stm32/f4/gpio.h>
-#include <libopencm3/stm32/f4/dma.h>
+#include <libopencm3/stm32/rcc.h>
+#include <libopencm3/stm32/gpio.h>
+#include <libopencm3/stm32/dma.h>
 #include <libopencm3/stm32/usart.h>
 #include <libopencm3/stm32/sdio.h>
 #include <libopencm3/cm3/nvic.h>
@@ -96,16 +97,15 @@ static void printf_bin(uint32_t test)
 
 static void clock_setup(void)
 {
-	rcc_peripheral_enable_clock(&RCC_APB1ENR, RCC_APB1ENR_PWREN);
+	rcc_periph_clock_enable(RCC_PWR);
 
 	/* Enable GPIO A/B clock for LED & USARTs. */
-	rcc_peripheral_enable_clock(&RCC_AHB1ENR, RCC_AHB1ENR_IOPAEN);
-	rcc_peripheral_enable_clock(&RCC_AHB1ENR, RCC_AHB1ENR_IOPBEN);
+	rcc_periph_clock_enable(RCC_GPIOA);
+	rcc_periph_clock_enable(RCC_GPIOB);
 
 	/* Enable GPIO C/D clock for SDIO */
-	rcc_peripheral_enable_clock(&RCC_AHB1ENR, RCC_AHB1ENR_IOPCEN);
-	rcc_peripheral_enable_clock(&RCC_AHB1ENR, RCC_AHB1ENR_IOPDEN);
-
+	rcc_periph_clock_enable(RCC_GPIOC);
+	rcc_periph_clock_enable(RCC_GPIOD);
 }
 
 static void sdio_setup(void)
@@ -134,10 +134,10 @@ static void sdio_setup(void)
 	gpio_set_af(GPIOD, GPIO_AF12, GPIO2);
 
 	/* Enable SDIO clock */
-	rcc_peripheral_enable_clock(&RCC_APB2ENR, RCC_APB2ENR_SDIOEN);
+	rcc_periph_clock_enable(RCC_SDIO);
 
 	/* Enable DMA2 clock */
-	rcc_peripheral_enable_clock(&RCC_AHB1ENR, RCC_AHB1ENR_DMA2EN);
+	rcc_periph_clock_enable(RCC_DMA2);
 
 	/* Initialize Clock with <400kHz */
 	sdio_set_clockdiv(0xee);
@@ -151,7 +151,7 @@ static void sdio_setup(void)
 static void usart_setup(void)
 {
 	/* Enable clocks for USART3. */
-	rcc_peripheral_enable_clock(&RCC_APB1ENR, RCC_APB1ENR_USART3EN);
+	rcc_periph_clock_enable(RCC_USART3);
 
 	/* Enable the USART3 interrupt. */
 	//nvic_enable_irq(NVIC_USART3_IRQ);
