@@ -3,12 +3,6 @@
 
 #include <stdint.h>
 
-
-#define ETIMEOUT	(-1)
-#define ECRCERR		(-2)
-#define ENOAPPMODE	(-3)
-#define EOPNOTSUPPORTED	(-4)
-
 struct sd_command {
 	uint32_t opcode;
 	uint32_t arg;
@@ -16,7 +10,15 @@ struct sd_command {
 	uint32_t resp[4];
 };
 
+void sd_setup(void);
+
+/* SD/MMC command access */
 int sd_command(struct sd_command *);
+
+#define ETIMEOUT	(-1)
+#define ECRCERR		(-2)
+#define ENOAPPMODE	(-3)
+#define EOPNOTSUPPORTED	(-4)
 
 #define MMC_RSP_PRESENT	(1 << 0)
 #define MMC_RSP_LONG	(1 << 1)

@@ -1,7 +1,7 @@
 /*
  * This file is part of the libopencm3 project.
  *
- * Copyright (C) 2013 Stefan Agner <stefan@agner.ch>
+ * Copyright (C) 2013-2015 Stefan Agner <stefan@agner.ch>
  *
  * This library is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published by
@@ -22,14 +22,13 @@
 #include <stdint.h>
 #include <errno.h>
 
-#include <libopencm3/stm32/rcc.h>
-#include <libopencm3/stm32/gpio.h>
 #include <libopencm3/stm32/dma.h>
-#include <libopencm3/stm32/usart.h>
 #include <libopencm3/stm32/sdio.h>
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/stm32/f4/flash.h>
+
 #include "sd.h"
+#include "sd_card.h"
 
 #ifdef DEBUG
 #define DEBUG_PRINT(fmt, args...)    printf(fmt, ## args)
@@ -37,11 +36,6 @@
 #define DEBUG_PRINT(fmt, args...)    /* Don't do anything in release builds */
 #endif
 
-enum sd_type {
-	SD, /* SD Standard capacity (legancy) */
-	SDV2, /* SD Normal capacity (V 2.00) */
-	SDV2HC, /* SD High capacity (V 2.00) */
-};
 
 const char const *sd_types[] = {
 	[SD] = "SD legancy",
@@ -49,152 +43,6 @@ const char const *sd_types[] = {
 	[SDV2HC] = "SDHC",
 };
 
-enum sd_state
-{
-	SD_STATE_UNKNOWN = -1,
-	SD_STATE_IDLE    = 0,
-	SD_STATE_READY   = 1,
-	SD_STATE_IDENT   = 2,
-	SD_STATE_STBY    = 3,
-	SD_STATE_TRAN    = 4,
-	SD_STATE_DATA    = 5,
-	SD_STATE_RCV     = 6,
-	SD_STATE_PRG     = 7,
-	SD_STATE_DIS     = 8
-};
-
-struct sd_card {
-	enum sd_type type;
-	uint32_t rca;
-	uint32_t csd[4];
-	uint32_t cid[4];
-};
-
-struct sd_card card1;
-uint8_t block[512];
-
-int _write(int file, char *ptr, int len);
-
-int _write(int file, char *ptr, int len)
-{
-	int i;
-
-	if (file == 1) {
-		for (i = 0; i < len; i++)
-			usart_send_blocking(USART3, ptr[i]);
-		return i;
-	}
-
-	errno = EIO;
-	return -1;
-}
-
-static void printf_bin(uint32_t test)
-{
-	int i = 1;
-	int k;
-	for (k = 31; k>=0; k--) {
-		if((i << k) & test)
-			usart_send_blocking(USART3, '1');
-		else
-			usart_send_blocking(USART3, '0');
-	}
-
-	printf("\r\n");
-}
-
-static void clock_setup(void)
-{
-	rcc_periph_clock_enable(RCC_PWR);
-
-	/* Enable GPIO A/B clock for LED & USARTs. */
-	rcc_periph_clock_enable(RCC_GPIOA);
-	rcc_periph_clock_enable(RCC_GPIOB);
-
-	/* Enable GPIO C/D clock for SDIO */
-	rcc_periph_clock_enable(RCC_GPIOC);
-	rcc_periph_clock_enable(RCC_GPIOD);
-}
-
-static void sdio_setup(void)
-{
-	sdio_reset();
-
-	/* Enable D0-D3 */
-	gpio_mode_setup(GPIOC, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO8);
-	gpio_mode_setup(GPIOC, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO9);
-	gpio_mode_setup(GPIOC, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO10);
-	gpio_mode_setup(GPIOC, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO11);
-	gpio_set_af(GPIOC, GPIO_AF12, GPIO8);
-	gpio_set_af(GPIOC, GPIO_AF12, GPIO9);
-	gpio_set_af(GPIOC, GPIO_AF12, GPIO10);
-	gpio_set_af(GPIOC, GPIO_AF12, GPIO11);
-	gpio_set_output_options(GPIOC, GPIO_OTYPE_PP, GPIO_OSPEED_25MHZ, GPIO8 | GPIO9 | GPIO10 | GPIO11);
-
-	/* Enable CLK */
-	gpio_mode_setup(GPIOC, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO12);
-	gpio_set_af(GPIOC, GPIO_AF12, GPIO12);
-	gpio_set_output_options(GPIOC, GPIO_OTYPE_PP, GPIO_OSPEED_25MHZ, GPIO12);
-
-	/* Enable CMD (on GPIOD!) */
-	gpio_mode_setup(GPIOD, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO2);
-	gpio_set_output_options(GPIOD, GPIO_OTYPE_PP, GPIO_OSPEED_25MHZ, GPIO2);
-	gpio_set_af(GPIOD, GPIO_AF12, GPIO2);
-
-	/* Enable SDIO clock */
-	rcc_periph_clock_enable(RCC_SDIO);
-
-	/* Enable DMA2 clock */
-	rcc_periph_clock_enable(RCC_DMA2);
-
-	/* Initialize Clock with <400kHz */
-	sdio_set_clockdiv(0xee);
-	sdio_set_buswidth(SDIO_CLKCR_WIDBUS_1);
-	sdio_enable_clock();
-
-	/* Power on... */
-	sdio_power_on();
-}
-
-static void usart_setup(void)
-{
-	/* Enable clocks for USART3. */
-	rcc_periph_clock_enable(RCC_USART3);
-
-	/* Enable the USART3 interrupt. */
-	//nvic_enable_irq(NVIC_USART3_IRQ);
-
-	/* Setup GPIO pins for USART3 transmit. */
-        gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO10);
-	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO10);
-
-	/* Setup GPIO pins for USART3 receive. */
-	gpio_set_output_options(GPIOB, GPIO_OTYPE_OD, GPIO_OSPEED_25MHZ, GPIO11);
-	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO11);
-
-	/* Setup USART3 TX and RX pin as alternate function. */
-	gpio_set_af(GPIOB, GPIO_AF7, GPIO10 | GPIO11);
-
-	/* Setup USART3 parameters. */
-	usart_set_baudrate(USART3, 115200);
-	usart_set_databits(USART3, 8);
-	usart_set_stopbits(USART3, USART_STOPBITS_1);
-	usart_set_mode(USART3, USART_MODE_TX_RX);
-	usart_set_parity(USART3, USART_PARITY_NONE);
-	usart_set_flow_control(USART3, USART_FLOWCONTROL_NONE);
-
-	/* Enable USART3 Receive interrupt. */
-//	usart_enable_rx_interrupt(USART3);
-
-	/* Finally enable the USART. */
-	usart_enable(USART3);
-}
-
-static void gpio_setup(void)
-{
-	/* Setup GPIO pin GPIO12 on GPIO port D for LED. */
-	gpio_mode_setup(GPIOD, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO12);
-}
 
 void dma2_stream3_isr(void)
 {
@@ -261,20 +109,15 @@ static void sd_start_transfer(uint8_t *buf, uint32_t dir)
 	/* Direction according to parameter... */
 	dma_set_transfer_mode(DMA2, DMA_STREAM3, dir);
 
-#ifdef DEBUG
-	printf("Combined DMA flags:\r\n");
-	printf_bin(DMA_SCR(DMA2, DMA_STREAM3));
-#endif
-
 	dma_enable_stream(DMA2, DMA_STREAM3);
 }
 
-static int sd_check_status(void)
+static int sd_check_status(struct sd_card *card)
 {
 	struct sd_command cmd = {
 		.opcode = SEND_STATUS,
 		.flags = MMC_RSP_R1,
-		.arg = card1.rca,
+		.arg = card->rca,
 	};
 	enum sd_state state;
 
@@ -286,19 +129,19 @@ static int sd_check_status(void)
 	return 0;
 }
 
-static int sd_write_single_block(uint8_t *buf, uint32_t blk)
+int sd_card_write_single_block(struct sd_card *card, uint8_t *buf, uint32_t blk)
 {
 	struct sd_command cmd = {
 		.opcode = WRITE_BLOCK,
 		.flags = MMC_RSP_R1,
 	};
 
-	if(card1.type == SDV2HC)
+	if(card->type == SDV2HC)
 		cmd.arg = blk;
 	else
 		cmd.arg = blk * 512;
 
-	sd_check_status();
+	sd_check_status(card);
 
 	sdio_data_timeout(20000); // 20000x1MHz = 20ms
 
@@ -325,19 +168,19 @@ static int sd_write_single_block(uint8_t *buf, uint32_t blk)
 	return 0;
 }
 
-static int sd_read_single_block(uint8_t *buf, uint32_t blk)
+int sd_card_read_single_block(struct sd_card *card, uint8_t *buf, uint32_t blk)
 {
 	struct sd_command cmd = {
 		.opcode = READ_SINGLE_BLOCK,
 		.flags = MMC_RSP_R1,
 	};
 
-	if(card1.type == SDV2HC)
+	if(card->type == SDV2HC)
 		cmd.arg = blk;
 	else
 		cmd.arg = blk * 512;
 
-	sd_check_status();
+	sd_check_status(card);
 
 	sdio_data_timeout(20000); // 20000x1MHz = 20ms
 
@@ -355,7 +198,6 @@ static int sd_read_single_block(uint8_t *buf, uint32_t blk)
 		if (SDIO_STA & SDIO_STA_DTIMEOUT)
                         return -1;
 	}
-	printf_bin(SDIO_STA);
 	SDIO_ICR |= SDIO_ICR_DBCKENDC;
 
 	return 0;
@@ -389,10 +231,12 @@ static int sd_app_cmd(struct sd_card *card, struct sd_command *cmd)
 	return 0;
 }
 
-static int sd_card_init(void)
+int sd_card_init(struct sd_card *card)
 {
 	int ret, i;
 	struct sd_command cmd = {0};
+
+	sd_setup();
 
 	printf("Go Idle state (CMD0)...\r\n");
 	cmd.opcode = GO_IDLE_STATE;
@@ -407,9 +251,9 @@ static int sd_card_init(void)
 
 	/* No or Legancy SD if this command does not answer... */
 	if (ret == ETIMEOUT) {
-		card1.type = SD;
+		card->type = SD;
 	} else if (!ret) {
-		card1.type = SDV2;
+		card->type = SDV2;
 	} else {
 		printf("Error on if condition\n");
 		return ret;
@@ -434,7 +278,7 @@ static int sd_card_init(void)
 	cmd.arg = SDIO_OCR_32_33;
 
 	/* If SD V2, indicate that we can handle SDHC card... */
-	if (card1.type == SDV2)
+	if (card->type == SDV2)
 		cmd.arg |= R3_CARD_CAPACITY_STATUS;
 
 	do {
@@ -443,9 +287,9 @@ static int sd_card_init(void)
 
 
 	/* If the card indicates CCS too, it's a SDHC card... */
-	if (card1.type == SDV2) {
+	if (card->type == SDV2) {
 		if(cmd.resp[0] & R3_CARD_CAPACITY_STATUS)
-			card1.type = SDV2HC;
+			card->type = SDV2HC;
 	}
 
 	/* Get card id */
@@ -456,7 +300,7 @@ static int sd_card_init(void)
 	sd_command(&cmd);
 
 	for (i = 0; i < 4; i++)
-		card1.cid[i] = cmd.resp[i];
+		card->cid[i] = cmd.resp[i];
 
 
 	printf("Relative Addr (CMD3)...\r\n");
@@ -464,29 +308,29 @@ static int sd_card_init(void)
 	cmd.flags = MMC_RSP_R6;
 	cmd.arg = 0;
 	sd_command(&cmd);
-	card1.rca = cmd.resp[0] & 0xFFFF0000;
+	card->rca = cmd.resp[0] & 0xFFFF0000;
 
 	printf("Read specific information (CMD9)...\r\n");
 	cmd.opcode = SEND_CSD;
 	cmd.flags = MMC_RSP_R2;
-	cmd.arg = card1.rca;
+	cmd.arg = card->rca;
 	sd_command(&cmd);
 
 	for (i = 0; i < 4; i++)
-		card1.csd[i] = cmd.resp[i];
+		card->csd[i] = cmd.resp[i];
 
 	/* Select the card... */
 	printf("Put the card in transfer mode (CMD7)...\r\n");
 	cmd.opcode = SELECT_CARD;
 	cmd.flags = MMC_RSP_R1B;
-	cmd.arg = card1.rca;
+	cmd.arg = card->rca;
 	sd_command(&cmd);
 
 	/* Set bus width (ACMD6)... */
 	cmd.opcode = SET_BUS_WIDTH;
 	cmd.flags = MMC_RSP_R1;
 	cmd.arg = BUS_WIDTH_4;
-	sd_app_cmd(&card1, &cmd);
+	sd_app_cmd(card, &cmd);
 
 	/* Raise Clock with to 1MHz */
 	sdio_set_clockdiv(0x2E); //Clock=48000/(46+2)=1MHz
@@ -502,7 +346,7 @@ static int sd_card_init(void)
 	return 0;
 }
 
-static void print_card_info(struct sd_card *card)
+void sd_card_print_info(struct sd_card *card)
 {
 
 	printf("Card type... : %s\r\n", sd_types[card->type]);
@@ -513,90 +357,3 @@ static void print_card_info(struct sd_card *card)
 
 }
 
-static void print_buffer(uint8_t *buffer, int size)
-{
-	int i, j, k;
-	for (i = 0; i < size / 32; i++)
-	{
-		for (j = 0; j < 8; j++) {
-			for (k = 0; k < 4; k++)
-				printf("%02x", buffer[i * 32 + j * 4 + k]);
-			printf(" ");
-		}
-		printf("\r\n");
-	}
-}
-
-static int sdio_read_write_test(int blocknbr)
-{
-	int i;
-	uint8_t data = 0;
-
-	printf("Read single block...\r\n");
-	if (sd_read_single_block(block, blocknbr)) {
-		printf("Read single block timed out!\r\n");
-			return -1;
-	}
-
-	printf("The data:\r\n");
-	print_buffer(block, 512);
-
-	printf("Write single block...\r\n");
-	for (i = 0; i < 512; i++)
-		block[i] = data++;
-
-	//sd_write_single_block(block, blocknbr);
-
-	return 0;
-}
-
-int main(void)
-{
-	rcc_clock_setup_hse_3v3(&hse_8mhz_3v3[CLOCK_3V3_168MHZ]);
-
-	clock_setup();
-	gpio_setup();
-	sdio_setup();
-	usart_setup();
-
-	if (!sd_card_init()) {
-		print_card_info(&card1);
-		sdio_read_write_test(0);
-	}
-
-	while (1) {
-		__asm__("NOP");
-	}
-}
-
-void usart2_isr(void)
-{
-	static uint8_t data = 'A';
-
-	/* Check if we were called because of RXNE. */
-	if (((USART_CR1(USART3) & USART_CR1_RXNEIE) != 0) &&
-			((USART_SR(USART3) & USART_SR_RXNE) != 0)) {
-
-		/* Indicate that we got data. */
-		gpio_toggle(GPIOD, GPIO12);
-
-		/* Retrieve the data from the peripheral. */
-		data = usart_recv(USART3);
-
-		/* Enable transmit interrupt so it sends back the data. */
-		usart_enable_tx_interrupt(USART3);
-	}
-
-	/* Check if we were called because of TXE. */
-	if (((USART_CR1(USART3) & USART_CR1_TXEIE) != 0) &&
-			((USART_SR(USART3) & USART_SR_TXE) != 0)) {
-
-		/* Put data into the transmit register. */
-		usart_send(USART3, data);
-
-		/* Disable the TXE interrupt as we don't need it anymore. */
-		usart_disable_tx_interrupt(USART3);
-	}
-
-        return;
-}

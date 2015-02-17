@@ -17,9 +17,9 @@
 ## along with this library.  If not, see <http://www.gnu.org/licenses/>.
 ##
 
-BINARY = sdio
+BINARY = sd_card
 
-OBJS += sd.o
+OBJS = sdio.o main.o
 
 LDSCRIPT = ../stm32f4-discovery.ld
 
