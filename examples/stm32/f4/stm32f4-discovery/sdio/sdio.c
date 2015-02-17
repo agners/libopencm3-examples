@@ -37,10 +37,16 @@
 #define DEBUG_PRINT(fmt, args...)    /* Don't do anything in release builds */
 #endif
 
-enum sdtype {
+enum sd_type {
 	SD, /* SD Standard capacity (legancy) */
 	SDV2, /* SD Normal capacity (V 2.00) */
 	SDV2HC, /* SD High capacity (V 2.00) */
+};
+
+const char const *sd_types[] = {
+	[SD] = "SD legancy",
+	[SDV2] = "SD",
+	[SDV2HC] = "SDHC",
 };
 
 enum sd_state
@@ -57,12 +63,14 @@ enum sd_state
 	SD_STATE_DIS     = 8
 };
 
-struct card {
-	enum sdtype type;
+struct sd_card {
+	enum sd_type type;
 	uint32_t rca;
+	uint32_t csd[4];
+	uint32_t cid[4];
 };
 
-struct card card1;
+struct sd_card card1;
 uint8_t block[512];
 
 int _write(int file, char *ptr, int len);
@@ -263,10 +271,16 @@ static void sd_start_transfer(uint8_t *buf, uint32_t dir)
 
 static int sd_check_status(void)
 {
+	struct sd_command cmd = {
+		.opcode = SEND_STATUS,
+		.flags = MMC_RSP_R1,
+		.arg = card1.rca,
+	};
 	enum sd_state state;
+
 	do {
-		sd_command(SEND_STATUS, MMC_RSP_R1, card1.rca);
-		state = (SDIO_RESP1 >> 9) & 0xf;
+		sd_command(&cmd);
+		state = (cmd.resp[0] >> 9) & 0xf;
 	} while (state != SD_STATE_TRAN);
 
 	return 0;
@@ -274,12 +288,15 @@ static int sd_check_status(void)
 
 static int sd_write_single_block(uint8_t *buf, uint32_t blk)
 {
-	uint32_t addr;
+	struct sd_command cmd = {
+		.opcode = WRITE_BLOCK,
+		.flags = MMC_RSP_R1,
+	};
 
 	if(card1.type == SDV2HC)
-		addr = blk;
+		cmd.arg = blk;
 	else
-		addr = blk * 512;
+		cmd.arg = blk * 512;
 
 	sd_check_status();
 
@@ -291,7 +308,7 @@ static int sd_write_single_block(uint8_t *buf, uint32_t blk)
 
 	/* CMD 24 */
 	DEBUG_PRINT("sd_command\r\n");
-	sd_command(WRITE_BLOCK, MMC_RSP_R1, addr);
+	sd_command(&cmd);
 
 	/* Start DMA transfer on SDIO pheripherial */
 	DEBUG_PRINT("sdio_start_block_transfer\r\n");
@@ -310,12 +327,15 @@ static int sd_write_single_block(uint8_t *buf, uint32_t blk)
 
 static int sd_read_single_block(uint8_t *buf, uint32_t blk)
 {
-	uint32_t addr;
+	struct sd_command cmd = {
+		.opcode = READ_SINGLE_BLOCK,
+		.flags = MMC_RSP_R1,
+	};
 
 	if(card1.type == SDV2HC)
-		addr = blk;
+		cmd.arg = blk;
 	else
-		addr = blk * 512;
+		cmd.arg = blk * 512;
 
 	sd_check_status();
 
@@ -328,9 +348,8 @@ static int sd_read_single_block(uint8_t *buf, uint32_t blk)
 	sdio_start_block_transfer(512, SDIO_DCTRL_DBLOCKSIZE_9, SDIO_DCTRL_DTDIR_CARD_TO_CTRL, true);
 
 	/* CMD 17 */
-	sd_command(READ_SINGLE_BLOCK, MMC_RSP_R1, addr);
+	sd_command(&cmd);
 
-	printf_bin(SDIO_STA);
 	while(!(SDIO_STA & SDIO_STA_DBCKEND))
 	{
 		if (SDIO_STA & SDIO_STA_DTIMEOUT)
@@ -342,96 +361,132 @@ static int sd_read_single_block(uint8_t *buf, uint32_t blk)
 	return 0;
 }
 
-static void sdio_init(void)
+static int sd_app_cmd(struct sd_card *card, struct sd_command *cmd)
 {
 	int ret;
-	uint32_t hcs;
+	static struct sd_command cmdapp = {
+		.opcode = APP_CMD,
+		.flags = MMC_RSP_R1,
+		.arg = 0,
+	};
+
+	/* Enable Application commands */
+	if (card)
+		cmdapp.arg = card->rca;
+	ret = sd_command(&cmdapp);
+	if (ret)
+		return ret;
+
+	/* The card should now be in app cmd mode... */
+	if(!(cmdapp.resp[0] & R1_APP_CMD)) {
+		printf("Timed out changing to application mode\n");
+		return ENOAPPMODE;
+	}
+
+	/* Get operation condition */
+	sd_command(cmd);
+
+	return 0;
+}
+
+static int sd_card_init(void)
+{
+	int ret, i;
+	struct sd_command cmd = {0};
 
 	printf("Go Idle state (CMD0)...\r\n");
-	sd_command(GO_IDLE_STATE, MMC_RSP_NONE, 0);
+	cmd.opcode = GO_IDLE_STATE;
+	cmd.flags = MMC_RSP_NONE;
+	sd_command(&cmd);
 
 	printf("Send if condition (CMD8)...\r\n");
-	ret = sd_command(SEND_IF_COND, MMC_RSP_R7, 0x000001AA);
+	cmd.opcode = SEND_IF_COND;
+	cmd.flags = MMC_RSP_R7;
+	cmd.arg = 0x000001AA;
+	ret = sd_command(&cmd);
 
 	/* No or Legancy SD if this command does not answer... */
 	if (ret == ETIMEOUT) {
 		card1.type = SD;
 	} else if (!ret) {
-		/* We set Rsv too, seems to be needed on some cards */
-		hcs = 0x40000000;
 		card1.type = SDV2;
 	} else {
 		printf("Error on if condition\n");
-		return;
-	}
-
-	/* Enable Application commands */
-	printf("Enable application commands... (CMD55)\r\n");
-	ret = sd_command(APP_CMD, MMC_RSP_R1, 0);
-
-	/* The card should now be in app cmd mode... */
-	if(!(SDIO_RESP1 & SDIO_CRDST_APP_CMD) || ret == ETIMEOUT) {
-		printf("Timed out changing to application mode\n");
-		return;
+		return ret;
 	}
 
 	/* Get operation condition */
-	sd_command(SD_APP_OP_COND, MMC_RSP_R3, 0);
+	cmd.opcode = SD_APP_OP_COND;
+	cmd.flags = MMC_RSP_R3;
+	cmd.arg = 0;
+	sd_app_cmd(NULL, &cmd);
 
 	/* The card has to support 3.3V, if not, exit... */
-	if(!(SDIO_RESP1 & SDIO_OCR_32_33)) {
+	if(!(cmd.resp[0] & SDIO_OCR_32_33)) {
 		printf("No 3.3V support announced by card!\r\n");
-		return;
+		return EOPNOTSUPPORTED;
 	}
 
-	printf("Set operation condition\r\n");
 	/* Set Operation Condition, wait until ready... */
+	printf("Set operation condition\r\n");
+	cmd.opcode = SD_APP_OP_COND;
+	cmd.flags = MMC_RSP_R3;
+	cmd.arg = SDIO_OCR_32_33;
+
+	/* If SD V2, indicate that we can handle SDHC card... */
+	if (card1.type == SDV2)
+		cmd.arg |= R3_CARD_CAPACITY_STATUS;
+
 	do {
-		/* Application command */
-		sd_command(APP_CMD, MMC_RSP_R1, 0);
-
-		/* Sent HCS Flag if SDV2! */
-		ret = sd_command(SD_APP_OP_COND, MMC_RSP_R3, hcs | SDIO_OCR_32_33);
-	} while (ret == ETIMEOUT || !(SDIO_RESP1 & SDIO_RESP1_READY));
+		ret = sd_app_cmd(NULL, &cmd);
+	} while (ret == ETIMEOUT || !(cmd.resp[0] & R3_CARD_BUSY));
 
 
+	/* If the card indicates CCS too, it's a SDHC card... */
 	if (card1.type == SDV2) {
-		if(SDIO_RESP1 & 0x40000000)
+		if(cmd.resp[0] & R3_CARD_CAPACITY_STATUS)
 			card1.type = SDV2HC;
-	}
-
-	switch (card1.type) {
-	case SD:
-		printf("Card type is SD\n\r");
-		break;
-	case SDV2:
-		printf("Card type is SDV2\n\r");
-		break;
-	case SDV2HC:
-		printf("Card type is SDHC\n\r");
-		break;
 	}
 
 	/* Get card id */
 	printf("Get card id (CMD2)...\r\n");
-	sd_command(ALL_SEND_CID, MMC_RSP_R2, 0);
+	cmd.opcode = ALL_SEND_CID;
+	cmd.flags = MMC_RSP_R2;
+	cmd.arg = 0;
+	sd_command(&cmd);
+
+	for (i = 0; i < 4; i++)
+		card1.cid[i] = cmd.resp[i];
 
 
 	printf("Relative Addr (CMD3)...\r\n");
-	sd_command(SEND_RELATIVE_ADDR, MMC_RSP_R6, 0);
-	card1.rca = SDIO_RESP1 & 0xFFFF0000;
+	cmd.opcode = SEND_RELATIVE_ADDR;
+	cmd.flags = MMC_RSP_R6;
+	cmd.arg = 0;
+	sd_command(&cmd);
+	card1.rca = cmd.resp[0] & 0xFFFF0000;
 
 	printf("Read specific information (CMD9)...\r\n");
-	sd_command(SEND_CSD, MMC_RSP_R2, card1.rca);
+	cmd.opcode = SEND_CSD;
+	cmd.flags = MMC_RSP_R2;
+	cmd.arg = card1.rca;
+	sd_command(&cmd);
+
+	for (i = 0; i < 4; i++)
+		card1.csd[i] = cmd.resp[i];
 
 	/* Select the card... */
 	printf("Put the card in transfer mode (CMD7)...\r\n");
-	sd_command(SELECT_CARD, MMC_RSP_R1B, card1.rca);
-
-	sd_command(APP_CMD, MMC_RSP_R1, card1.rca);
+	cmd.opcode = SELECT_CARD;
+	cmd.flags = MMC_RSP_R1B;
+	cmd.arg = card1.rca;
+	sd_command(&cmd);
 
 	/* Set bus width (ACMD6)... */
-	sd_command(SET_BUS_WIDTH, MMC_RSP_R1, BUS_WIDTH_4);
+	cmd.opcode = SET_BUS_WIDTH;
+	cmd.flags = MMC_RSP_R1;
+	cmd.arg = BUS_WIDTH_4;
+	sd_app_cmd(&card1, &cmd);
 
 	/* Raise Clock with to 1MHz */
 	sdio_set_clockdiv(0x2E); //Clock=48000/(46+2)=1MHz
@@ -439,7 +494,23 @@ static void sdio_init(void)
 	sdio_enable_clock();
 
 	/* Set block len (CMD16) */
-	sd_command(SET_BLOCKLEN, MMC_RSP_R1, 512);
+	cmd.opcode = SET_BLOCKLEN;
+	cmd.flags = MMC_RSP_R1;
+	cmd.arg = 512;
+	sd_command(&cmd);
+
+	return 0;
+}
+
+static void print_card_info(struct sd_card *card)
+{
+
+	printf("Card type... : %s\r\n", sd_types[card->type]);
+	printf("CID......... : %08lx %08lx %08lx %08lx\r\n",
+		card->cid[0], card->cid[1], card->cid[2], card->cid[3]);
+	printf("CSD......... : %08lx %08lx %08lx %08lx\r\n",
+		card->csd[0], card->csd[1], card->csd[2], card->csd[3]);
+
 }
 
 static void print_buffer(uint8_t *buffer, int size)
@@ -467,8 +538,6 @@ static int sdio_read_write_test(int blocknbr)
 			return -1;
 	}
 
-	printf("Read finished...\r\n");
-
 	printf("The data:\r\n");
 	print_buffer(block, 512);
 
@@ -476,7 +545,7 @@ static int sdio_read_write_test(int blocknbr)
 	for (i = 0; i < 512; i++)
 		block[i] = data++;
 
-	sd_write_single_block(block, blocknbr);
+	//sd_write_single_block(block, blocknbr);
 
 	return 0;
 }
@@ -490,9 +559,10 @@ int main(void)
 	sdio_setup();
 	usart_setup();
 
-	sdio_init();
-
-	sdio_read_write_test(0);
+	if (!sd_card_init()) {
+		print_card_info(&card1);
+		sdio_read_write_test(0);
+	}
 
 	while (1) {
 		__asm__("NOP");

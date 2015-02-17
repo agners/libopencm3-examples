@@ -3,28 +3,20 @@
 
 #include <stdint.h>
 
-struct resp1 {
-  int start_bit : 1;
-  int transmission_bit : 1;
-  int command_index : 6;
-  int card_status : 32;
-  int crc7 : 7;
-  int end_bit : 1;
-};
-
-struct resp4 {
-  uint8_t operate : 1;
-  uint8_t number_of_io_functions : 1;
-  uint8_t memory_present : 1;
-  uint8_t stuff_bits : 3;
-  uint32_t io_ocr : 24; /* Operation condition register */
-};
 
 #define ETIMEOUT	(-1)
 #define ECRCERR		(-2)
+#define ENOAPPMODE	(-3)
+#define EOPNOTSUPPORTED	(-4)
 
-int sd_command(uint32_t cmd, uint32_t resp, uint32_t arg);
-uint32_t sd_response(uint32_t *response, uint32_t type);
+struct sd_command {
+	uint32_t opcode;
+	uint32_t arg;
+	uint32_t flags;
+	uint32_t resp[4];
+};
+
+int sd_command(struct sd_command *);
 
 #define MMC_RSP_PRESENT	(1 << 0)
 #define MMC_RSP_LONG	(1 << 1)
@@ -65,34 +57,42 @@ uint32_t sd_response(uint32_t *response, uint32_t type);
 #define SDIO_OCR_34_35 (0x1 << 22)
 #define SDIO_OCR_35_36 (0x1 << 23)
 
-#define SDIO_CRDST_OUT_OF_RANGE (0x1 << 31)
-#define SDIO_CRDST_ADDRESS_ERROR (0x1 << 30)
-#define SDIO_CRDST_BLOCK_LEN_ERROR (0x1 << 29)
-#define SDIO_CRDST_ERASE_SEQ_ERROR (0x1 << 28)
-#define SDIO_CRDST_ERASE_PARAM (0x1 << 27)
-#define SDIO_CRDST_WP_VIOLATION (0x1 << 26)
-#define SDIO_CRDST_CARD_IS_LOCKED (0x1 << 25)
-#define SDIO_CRDST_LOCK_UNLOCK_FAILED (0x1 << 24)
-#define SDIO_CRDST_COM_CRC_ERROR (0x1 << 23)
-#define SDIO_CRDST_ILLEGAL_COMMAND (0x1 << 22)
-#define SDIO_CRDST_CARD_ECC_FAILED (0x1 << 21)
-#define SDIO_CRDST_CC_ERROR (0x1 << 20)
-#define SDIO_CRDST_ERROR (0x1 << 19)
-#define SDIO_CRDST_UNDERRUN (0x1 << 18)
-#define SDIO_CRDST_OVERRUN (0x1 << 17)
-#define SDIO_CRDST_CID_CSD_OVERWRITE (0x1 << 16)
-#define SDIO_CRDST_WP_ERASE_SKIP (0x1 << 15)
-#define SDIO_CRDST_CARD_ECC_DISABLED (0x1 << 14)
-#define SDIO_CRDST_ERASE_RESET (0x1 << 13)
-#define SDIO_CRDST_CURRENT_STATE_MSK (0xf << 9)
-#define SDIO_CRDST_READY_FOR_DATA (0x1 << 8)
-#define SDIO_CRDST_APP_CMD (0x1 << 5)
-#define SDIO_CRDST_AKE_SEQ_ERROR (0x1 << 3)
+#define R1_OUT_OF_RANGE		(0x1 << 31)
+#define R1_ADDRESS_ERROR	(0x1 << 30)
+#define R1_BLOCK_LEN_ERROR	(0x1 << 29)
+#define R1_ERASE_SEQ_ERROR	(0x1 << 28)
+#define R1_ERASE_PARAM		(0x1 << 27)
+#define R1_WP_VIOLATION		(0x1 << 26)
+#define R1_CARD_IS_LOCKED	(0x1 << 25)
+#define R1_LOCK_UNLOCK_FAILED	(0x1 << 24)
+#define R1_COM_CRC_ERROR	(0x1 << 23)
+#define R1_ILLEGAL_COMMAND	(0x1 << 22)
+#define R1_CARD_ECC_FAILED	(0x1 << 21)
+#define R1_CC_ERROR		(0x1 << 20)
+#define R1_ERROR		(0x1 << 19)
+#define R1_UNDERRUN		(0x1 << 18)
+#define R1_OVERRUN		(0x1 << 17)
+#define R1_CID_CSD_OVERWRITE	(0x1 << 16)
+#define R1_WP_ERASE_SKIP	(0x1 << 15)
+#define R1_CARD_ECC_DISABLED	(0x1 << 14)
+#define R1_ERASE_RESET		(0x1 << 13)
+#define R1_CURRENT_STATE_MSK	(0xf << 9)
+#define R1_READY_FOR_DATA	(0x1 << 8)
+#define R1_APP_CMD		(0x1 << 5)
+#define R1_AKE_SEQ_ERROR	(0x1 << 3)
 
+#define R1_STATE_IDLE	0
+#define R1_STATE_READY	1
+#define R1_STATE_IDENT	2
+#define R1_STATE_STBY	3
+#define R1_STATE_TRAN	4
+#define R1_STATE_DATA	5
+#define R1_STATE_RCV	6
+#define R1_STATE_PRG	7
+#define R1_STATE_DIS	8
 
-
-
-
+#define R3_CARD_BUSY		(0x1 << 31)
+#define R3_CARD_CAPACITY_STATUS	(0x1 << 30)
 
 /* MMC/SD Command Index */
 /* Basic command (class 0) */
