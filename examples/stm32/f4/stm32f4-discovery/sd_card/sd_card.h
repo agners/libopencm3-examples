@@ -20,6 +20,8 @@
 #ifndef SD_CARD_H
 #define SD_CARD_H
 
+#include <stdint.h>
+
 enum sd_type {
 	SD, /* SD Standard capacity (legancy) */
 	SDV2, /* SD Normal capacity (V 2.00) */

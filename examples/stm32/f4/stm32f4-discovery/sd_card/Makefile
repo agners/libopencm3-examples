@@ -19,7 +19,7 @@
 
 BINARY = sd_card
 
-OBJS = sdio.o main.o
+OBJS = sdio.o main.o fatfs/ff.o fatfs/diskio.o fatfs/option/unicode.o
 
 LDSCRIPT = ../stm32f4-discovery.ld
 

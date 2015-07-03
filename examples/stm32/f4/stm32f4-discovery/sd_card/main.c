@@ -26,6 +26,7 @@
 #include <libopencm3/cm3/nvic.h>
 
 #include "sd_card.h"
+#include "fatfs/ff.h"
 
 struct sd_card card1;
 uint8_t block[512];
@@ -136,6 +137,51 @@ static int sd_read_write_test(struct sd_card *card, int blocknbr)
 	return 0;
 }
 
+static void fatfs_test(void)
+{
+	FRESULT res;
+	FATFS fs;
+	FATFS *fsfs = &fs;
+	DWORD free;
+	char *path = "0:";
+	char *fn;
+	DIR dir;
+	FILINFO fno;
+#if _USE_LFN
+	static char lfn[_MAX_LFN + 1];   /* Buffer to store the LFN */
+	fno.lfname = lfn;
+	fno.lfsize = sizeof(lfn);
+#endif
+
+	res = f_mount(&fs, "0:", 1);
+	if (res) {
+		printf("f_mount res %d\r\n", res);
+		return;
+	}
+
+	f_getfree("0:", &free, &fsfs);
+	printf("free space %d\r\n", free);
+
+	res = f_opendir(&dir, path);
+	if (res != FR_OK)
+		return;
+
+	for (;;) {
+		res = f_readdir(&dir, &fno);
+		if (res != FR_OK || fno.fname[0] == 0) break;
+		if (fno.fname[0] == '.') continue;
+		fn = *fno.lfname ? fno.lfname : fno.fname;
+		if (fno.fattrib & AM_DIR) {                    /* It is a directory */
+			printf("D %s/%s\r\n", path, fn);
+		} else {                                       /* It is a file. */
+			printf("F %s/%s\r\n", path, fn);
+		}
+	}
+	f_closedir(&dir);
+
+	printf("finished...\r\n");
+}
+
 int main(void)
 {
 	rcc_clock_setup_hse_3v3(&hse_8mhz_3v3[CLOCK_3V3_168MHZ]);
@@ -144,10 +190,13 @@ int main(void)
 	gpio_setup();
 	usart_setup();
 
+	fatfs_test();
+/*
 	if (!sd_card_init(&card1)) {
 		sd_card_print_info(&card1);
 		sd_read_write_test(&card1, 0);
 	}
+*/
 
 	while (1) {
 		__asm__("NOP");

@@ -17,7 +17,6 @@
  * along with this library. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#define DEBUG
 #include <stdio.h>
 #include <stdint.h>
 #include <errno.h>
